@@ -2,6 +2,7 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.import_linter_cache/
 .coverage
 .coverage.*
 .env

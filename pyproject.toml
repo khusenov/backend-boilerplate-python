@@ -9,9 +9,10 @@ dependencies = [
 [dependency-groups]
 dev = [
     "basedpyright>=1.40.2",
+    "import-linter>=2.15",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff==0.17.0"
+    "ruff==0.17.0",
 ]
 
 [build-system]
@@ -56,6 +57,16 @@ enableTypeIgnoreComments = false
 reportIgnoreCommentWithoutRule = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
 failOnWarnings = true
+
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Entrypoint chain"
+type = "layers"
+containers = ["app"]
+layers = ["main | (worker) | (cli)", "(bootstrap)", "modules", "core"]
+exhaustive = true
 
 [tool.pytest]
 testpaths = ["tests"]
