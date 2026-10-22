@@ -1,0 +1,75 @@
+[project]
+name = "backend-boilerplate"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.143.1",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.2",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff==0.17.0"
+]
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv]
+required-version = ">=0.12.7"
+
+[tool.uv.build-backend]
+module-name = "app"
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "SIM", "C4", "C90", "RUF", "ASYNC", "S", "BLE",
+    "TRY", "PT", "DTZ", "TID", "FAST", "T20", "PLE", "PLW", "FURB", "ERA", "FIX", "INP",
+    "PGH", "G",
+]
+ignore = ["TRY003", "TRY004"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"os.environ".msg = "Read settings through app.core.config.Settings."
+"os.environb".msg = "Read settings through app.core.config.Settings."
+"os.getenv".msg = "Read settings through app.core.config.Settings."
+"os.getenvb".msg = "Read settings through app.core.config.Settings."
+"fastapi.BackgroundTasks".msg = "Defer a job with app.core.jobs.JobQueue instead."
+"fastapi.background".msg = "Defer a job with app.core.jobs.JobQueue instead."
+"starlette.background".msg = "Defer a job with app.core.jobs.JobQueue instead."
+"asyncio.create_task".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
+"asyncio.tasks.create_task".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
+"asyncio.ensure_future".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
+"asyncio.tasks.ensure_future".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
+"src".msg = "Import app, not src.app."
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+strict = ["src"]
+enableTypeIgnoreComments = false
+reportIgnoreCommentWithoutRule = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+failOnWarnings = true
+
+[tool.pytest]
+testpaths = ["tests"]
+strict = true
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+fail_under = 90
+precision = 2
+exclude_lines = []
+partial_branches = []
+show_missing = true
+skip_covered = true
