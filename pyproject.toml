@@ -4,6 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.143.1",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.0",
 ]
 
 [dependency-groups]
@@ -49,6 +51,8 @@ ignore = ["TRY003", "TRY004"]
 "asyncio.ensure_future".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
 "asyncio.tasks.ensure_future".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
 "src".msg = "Import app, not src.app."
+"typing.no_type_check".msg = "Silence one line with # pyright: ignore[rule]."
+"typing_extensions.no_type_check".msg = "Silence one line with # pyright: ignore[rule]."
 
 [tool.basedpyright]
 typeCheckingMode = "standard"
