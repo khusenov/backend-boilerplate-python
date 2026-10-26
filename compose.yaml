@@ -1,3 +1,14 @@
+x-app: &app
+  image: backend-boilerplate
+  profiles: [full]
+  environment:
+    APP_ENV: production
+    SECRET_KEY: compose-only-secret-key-for-production-mode
+    DATABASE_URL: postgresql://app:app@postgres:5432/app
+    CORS_ORIGINS: https://app.example.com
+    TRUSTED_PROXY_HOPS: "1"
+  stop_grace_period: 45s
+
 services:
   postgres:
     image: postgres:18
@@ -14,6 +25,26 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+
+  migrate:
+    <<: *app
+    command: ["sh", "-c", "alembic upgrade head && alembic check"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:
