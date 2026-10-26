@@ -9,6 +9,7 @@ import pytest
 import structlog
 from fastapi import APIRouter, FastAPI, Request, Response
 from httpx import ASGITransport, AsyncClient
+from starlette.types import Message, Scope
 
 from app.core.config import Settings
 from app.core.http.middleware import MAX_BODY_BYTES
@@ -139,6 +140,34 @@ async def test_failed_request_is_logged_as_500(
     assert (access["event"], access["status"]) == ("http.request", 500)
     assert server_error["request_id"] == access["request_id"]
     assert server_error["exception"].endswith("RuntimeError: boom")
+
+
+async def test_access_lines_show_the_real_client_ip(
+    client: AsyncClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    await client.get("/missing", headers={"X-Forwarded-For": "6.6.6.6, 203.0.113.7"})
+    await client.get("/missing")
+
+    access = [line for line in json_lines(caplog) if line["event"] == "http.request"]
+    assert [line["client_ip"] for line in access] == ["203.0.113.7", "127.0.0.1"]
+
+
+async def test_access_line_without_a_peer_address(
+    app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    scope: Scope = {"type": "http", "method": "GET", "path": "/missing", "headers": []}
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b""}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await app(scope, receive, send)
+
+    (access,) = [line for line in json_lines(caplog) if line["event"] == "http.request"]
+    assert (sent[0]["status"], access["client_ip"]) == (404, None)
 
 
 async def test_log_bindings_last_for_one_request(

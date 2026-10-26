@@ -20,5 +20,6 @@ ENV PATH=/app/.venv/bin:$PATH
 USER app
 EXPOSE 8000
 ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
 LABEL org.opencontainers.image.revision=$GIT_SHA
 CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers", "--no-access-log", "--timeout-keep-alive", "120", "--timeout-graceful-shutdown", "20"]
