@@ -1,6 +1,6 @@
 import pytest
 from fastapi.routing import iter_route_contexts
-from pydantic import SecretStr, ValidationError
+from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.main import create_app
@@ -22,12 +22,17 @@ def test_app_boots(settings: Settings) -> None:
 def test_short_production_key_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("SECRET_KEY", "x" * 31)
+    monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
 
     with pytest.raises(ValidationError) as caught:
         create_app()
 
     message = str(caught.value)
-    assert "SECRET_KEY must be at least 32 characters in production" in message
+    assert (
+        "unsafe production settings: SECRET_KEY must be at least 32 characters "
+        "[type=value_error]"
+    ) in message
     assert "input_value" not in message
 
 
@@ -61,7 +66,5 @@ def test_docs_are_served_outside_production(settings: Settings) -> None:
     assert served_paths(settings) >= DOCS_PATHS
 
 
-def test_production_serves_no_docs() -> None:
-    settings = Settings(app_env="production", secret_key=SecretStr("x" * 32))
-
-    assert served_paths(settings).isdisjoint(DOCS_PATHS)
+def test_production_serves_no_docs(production_settings: Settings) -> None:
+    assert served_paths(production_settings).isdisjoint(DOCS_PATHS)

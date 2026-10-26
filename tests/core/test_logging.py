@@ -10,7 +10,6 @@ import pytest
 import structlog
 from fastapi import APIRouter, FastAPI
 from httpx import AsyncClient
-from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.core.logging import MAX_REDACTION_DEPTH, build_formatter, redact_credentials
@@ -49,10 +48,10 @@ async def test_json_line_has_request_id_and_redacted_password(
     assert password not in str(lines)
 
 
-def test_production_writes_json_lines() -> None:
+def test_production_writes_json_lines(production_settings: Settings) -> None:
     stdout = io.StringIO()
     with redirect_stdout(stdout):
-        create_app(Settings(app_env="production", secret_key=SecretStr("x" * 32)))
+        create_app(production_settings)
         logger.info("app.started")
 
     line = json.loads(stdout.getvalue())
@@ -67,11 +66,11 @@ def test_production_writes_json_lines() -> None:
 
 @pytest.mark.parametrize("app_env", ["local", "test"])
 def test_other_environments_write_console_lines(
-    app_env: Literal["local", "test"],
+    settings: Settings, app_env: Literal["local", "test"]
 ) -> None:
     stdout = io.StringIO()
     with redirect_stdout(stdout):
-        create_app(Settings(app_env=app_env, secret_key=SecretStr("local-secret-key")))
+        create_app(settings.model_copy(update={"app_env": app_env}))
         logger.info("app.started", password="local-password")
 
     output = stdout.getvalue()
@@ -180,7 +179,7 @@ def test_tracebacks_leave_out_local_variables(
 
 
 def test_uvicorn_lines_reach_stdout_without_access_lines(
-    monkeypatch: pytest.MonkeyPatch,
+    production_settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     uvicorn_output = io.StringIO()
     for name in ("uvicorn", "uvicorn.access"):
@@ -190,7 +189,7 @@ def test_uvicorn_lines_reach_stdout_without_access_lines(
         monkeypatch.setattr(uvicorn_logger, "propagate", False)
     stdout = io.StringIO()
     with redirect_stdout(stdout):
-        create_app(Settings(app_env="production", secret_key=SecretStr("x" * 32)))
+        create_app(production_settings)
         logging.getLogger("uvicorn.error").info(
             "Started server process [%d]",
             42,
