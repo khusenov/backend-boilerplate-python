@@ -7,6 +7,8 @@ x-app: &app
     DATABASE_URL: postgresql://app:app@postgres:5432/app
     CORS_ORIGINS: https://app.example.com
     TRUSTED_PROXY_HOPS: "1"
+    SENTRY_DSN: https://public@sentry.invalid/1
+    SENTRY_ENVIRONMENT: compose
   stop_grace_period: 45s
 
 services:
@@ -28,7 +30,7 @@ services:
 
   migrate:
     <<: *app
-    command: ["sh", "-c", "alembic upgrade head && alembic check"]
+    command: ["sh", "-c", "alembic -x ahead=skip upgrade head && alembic -x ahead=skip check"]
     depends_on:
       postgres:
         condition: service_healthy

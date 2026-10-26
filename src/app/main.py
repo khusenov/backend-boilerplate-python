@@ -22,6 +22,7 @@ from app.core.http.openapi import document_problems, operation_id
 from app.core.http.problems import EXCEPTION_HANDLERS
 from app.core.logging import configure_logging
 from app.core.resources import Resources
+from app.core.sentry import configure_sentry, flush_sentry
 
 
 class App(FastAPI):
@@ -35,18 +36,22 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.model_validate({})
     configure_logging(settings)
+    configure_sentry(settings)
     production = settings.app_env == "production"
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[AppState]:
-        if resources is not None:
-            yield {"resources": resources}
-            return
-        built = build_resources(settings)
         try:
-            yield {"resources": built}
+            if resources is not None:
+                yield {"resources": resources}
+                return
+            built = build_resources(settings)
+            try:
+                yield {"resources": built}
+            finally:
+                await built.close()
         finally:
-            await built.close()
+            await flush_sentry()
 
     app = App(
         title="backend-boilerplate",

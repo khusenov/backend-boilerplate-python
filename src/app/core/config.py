@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     database_url: SecretStr
     cors_origins: Annotated[tuple[str, ...], NoDecode] = ()
     trusted_proxy_hops: NonNegativeInt = 0
+    sentry_dsn: SecretStr | None = None
+    sentry_environment: str | None = None
+    git_sha: str = "unknown"
 
     @classmethod
     def settings_customise_sources(
@@ -59,6 +62,10 @@ class Settings(BaseSettings):
         problems: list[str] = []
         if len(self.secret_key) < 32:
             problems.append("SECRET_KEY must be at least 32 characters")
+        if self.sentry_dsn is None:
+            problems.append("SENTRY_DSN is required")
+        if self.sentry_environment is None:
+            problems.append("SENTRY_ENVIRONMENT is required")
         if self.trusted_proxy_hops == 0:
             problems.append("TRUSTED_PROXY_HOPS must be above 0")
         if not self.cors_origins or not all(
