@@ -1,63 +1,20 @@
-import uuid
 from collections.abc import AsyncIterator
 
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import (
-    CheckConstraint,
-    ForeignKey,
-    Index,
-    MetaData,
-    UniqueConstraint,
-    event,
-    text,
-)
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.config import Settings
-from app.core.db import Base, psycopg_url
-
-
-class ScratchBase(Base):
-    __abstract__ = True
-    metadata = MetaData(naming_convention=Base.metadata.naming_convention)
-
-
-class ScratchNote(ScratchBase):
-    __tablename__ = "scratch_notes"
-
-    body: Mapped[str]
-
-
-class ScratchTag(ScratchBase):
-    __tablename__ = "scratch_tags"
-    __table_args__ = (
-        UniqueConstraint("note_id", "name"),
-        Index(None, "name", "created_at"),
-        CheckConstraint("length(name) > 0", name="name_not_empty"),
-    )
-
-    note_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("scratch_notes.id"), index=True
-    )
-    name: Mapped[str]
+from app.core.db import psycopg_url
+from tests.scratch import ScratchNote
 
 
 @pytest.fixture
-async def session(settings: Settings) -> AsyncIterator[AsyncSession]:
-    engine = create_async_engine(psycopg_url(settings.database_url))
-    async with engine.connect() as connection:
-        transaction = await connection.begin()
-        await connection.run_sync(ScratchBase.metadata.create_all)
-        async with AsyncSession(
-            connection,
-            expire_on_commit=False,
-            join_transaction_mode="create_savepoint",
-        ) as session:
-            yield session
-        await transaction.rollback()
-    await engine.dispose()
+async def session(
+    scratch_tables: None, sessionmaker: async_sessionmaker[AsyncSession]
+) -> AsyncIterator[AsyncSession]:
+    async with sessionmaker() as session:
+        yield session
 
 
 @pytest.mark.parametrize("scheme", ["postgres", "postgresql", "postgresql+psycopg2"])

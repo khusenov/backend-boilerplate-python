@@ -5,6 +5,8 @@ import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
+from app.core.config import Settings
+from app.main import create_app
 from tests.migrations import PYPROJECT
 
 SNAPSHOTS = Path(__file__).parent / "snapshots"
@@ -37,4 +39,19 @@ def test_revisions_are_append_only(update_snapshots: bool) -> None:
 
     assert document == snapshot.read_text(), (
         "the revisions changed: review the diff, then run make snapshots"
+    )
+
+
+def test_openapi_matches_the_snapshot(
+    settings: Settings, update_snapshots: bool
+) -> None:
+    schema = create_app(settings).openapi()
+    document = json.dumps(schema, indent=2, sort_keys=True) + "\n"
+    snapshot = SNAPSHOTS / "openapi.json"
+    if update_snapshots:
+        SNAPSHOTS.mkdir(exist_ok=True)
+        snapshot.write_text(document)
+
+    assert document == snapshot.read_text(), (
+        "the OpenAPI schema changed: review the diff, then run make snapshots"
     )
