@@ -1,9 +1,11 @@
 import pytest
 from fastapi.routing import iter_route_contexts
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
+from sentry_sdk.utils import BadDsn
 
 from app.core.config import Settings
 from app.main import create_app
+from tests.sentry import FAKE_DSN
 
 DOCS_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
@@ -27,6 +29,8 @@ def test_short_production_key_fails_boot(
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
     monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    monkeypatch.setenv("SENTRY_DSN", FAKE_DSN)
+    monkeypatch.setenv("SENTRY_ENVIRONMENT", "production")
 
     with pytest.raises(ValidationError) as caught:
         create_app()
@@ -37,6 +41,13 @@ def test_short_production_key_fails_boot(
         "[type=value_error]"
     ) in message
     assert "input_value" not in message
+
+
+def test_malformed_sentry_dsn_fails_boot(production_settings: Settings) -> None:
+    update = {"sentry_dsn": SecretStr("public@sentry.invalid/1")}
+
+    with pytest.raises(BadDsn, match="Unsupported scheme"):
+        create_app(production_settings.model_copy(update=update))
 
 
 def test_empty_secret_key_fails_boot(
@@ -53,7 +64,6 @@ def test_empty_secret_key_fails_boot(
 def test_missing_app_env_fails_boot(
     monkeypatch: pytest.MonkeyPatch, database_url: str
 ) -> None:
-    monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.setenv("SECRET_KEY", "x" * 32)
     monkeypatch.setenv("DATABASE_URL", database_url)
 
@@ -64,7 +74,6 @@ def test_missing_app_env_fails_boot(
 def test_missing_database_url_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("SECRET_KEY", "x" * 32)
-    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ValidationError, match="Field required"):
         create_app()

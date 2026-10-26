@@ -61,11 +61,13 @@ class AccessLogMiddleware:
         try:
             await self.app(scope, receive, send_with_status)
         finally:
+            client = scope.get("client")
             logger.info(
                 "http.request",
                 method=scope["method"],
                 path=scope["path"],
                 status=status,
+                client_ip=client[0] if client else None,
                 duration_ms=round((time.perf_counter() - started) * 1000, 2),
             )
 

@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
+import sentry_sdk
 from alembic import command
 from fastapi import FastAPI
 from httpx import AsyncClient
@@ -20,6 +21,7 @@ from app.main import create_app
 from tests.clients import serve
 from tests.migrations import alembic_config
 from tests.scratch import ScratchBase
+from tests.sentry import FAKE_DSN, CapturingTransport
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -71,6 +73,12 @@ async def scratch_tables(connection: AsyncConnection) -> None:
     await connection.run_sync(ScratchBase.metadata.create_all)
 
 
+@pytest.fixture(autouse=True)
+def hermetic_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name.upper(), raising=False)
+
+
 @pytest.fixture
 def settings(database_url: str) -> Settings:
     return Settings(
@@ -90,7 +98,17 @@ def production_settings(database_url: str) -> Settings:
         database_url=SecretStr(database_url),
         cors_origins=("https://app.example.com",),
         trusted_proxy_hops=1,
+        sentry_dsn=SecretStr(FAKE_DSN),
+        sentry_environment="production",
     )
+
+
+@pytest.fixture(autouse=True)
+def offline_sentry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setattr("sentry_sdk.transport.HttpTransport", CapturingTransport)
+    yield
+    sentry_sdk.get_client().close()
+    sentry_sdk.get_global_scope().set_client(None)
 
 
 @pytest.fixture

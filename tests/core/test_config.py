@@ -21,6 +21,8 @@ def test_production_accepts_safe_settings(production_settings: Settings) -> None
     ("changes", "problem"),
     [
         ({"secret_key": "x" * 31}, "SECRET_KEY must be at least 32 characters"),
+        ({"sentry_dsn": None}, "SENTRY_DSN is required"),
+        ({"sentry_environment": None}, "SENTRY_ENVIRONMENT is required"),
         ({"trusted_proxy_hops": 0}, "TRUSTED_PROXY_HOPS must be above 0"),
         ({"cors_origins": ()}, EXPLICIT_ORIGINS),
         ({"cors_origins": ("*",)}, EXPLICIT_ORIGINS),
@@ -43,7 +45,13 @@ def test_production_rejects_unsafe_settings(
 def test_production_lists_every_problem_at_once(
     production_settings: Settings,
 ) -> None:
-    changes = {"secret_key": "x" * 31, "trusted_proxy_hops": 0, "cors_origins": ()}
+    changes = {
+        "secret_key": "x" * 31,
+        "sentry_dsn": None,
+        "sentry_environment": None,
+        "trusted_proxy_hops": 0,
+        "cors_origins": (),
+    }
     values = production_settings.model_dump() | changes
 
     with pytest.raises(ValidationError) as caught:
@@ -53,6 +61,7 @@ def test_production_lists_every_problem_at_once(
     assert error["msg"] == (
         "Value error, unsafe production settings: "
         "SECRET_KEY must be at least 32 characters; "
+        "SENTRY_DSN is required; SENTRY_ENVIRONMENT is required; "
         f"TRUSTED_PROXY_HOPS must be above 0; {EXPLICIT_ORIGINS}"
     )
 
@@ -63,12 +72,27 @@ def test_unset_proxy_and_cors_settings_trust_nothing(
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("SECRET_KEY", "local-secret-key")
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.delenv("CORS_ORIGINS", raising=False)
-    monkeypatch.delenv("TRUSTED_PROXY_HOPS", raising=False)
 
     settings = Settings.model_validate({})
 
     assert (settings.cors_origins, settings.trusted_proxy_hops) == ((), 0)
+
+
+def test_unset_sentry_settings_report_nothing(
+    monkeypatch: pytest.MonkeyPatch, database_url: str
+) -> None:
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("SECRET_KEY", "local-secret-key")
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("SENTRY_DSN", "")
+
+    settings = Settings.model_validate({})
+
+    assert (settings.sentry_dsn, settings.sentry_environment, settings.git_sha) == (
+        None,
+        None,
+        "unknown",
+    )
 
 
 def test_trusted_proxy_hops_cannot_be_negative(settings: Settings) -> None:
@@ -125,15 +149,12 @@ def test_settings_are_frozen(settings: Settings) -> None:
 
 
 def test_settings_read_only_environment_variables(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_url: str
+    tmp_path: Path, database_url: str
 ) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         f"APP_ENV=local\nSECRET_KEY=read-from-a-file\nDATABASE_URL={database_url}\n"
     )
-    monkeypatch.delenv("APP_ENV", raising=False)
-    monkeypatch.delenv("SECRET_KEY", raising=False)
-    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ValidationError, match="Field required"):
         Settings.model_validate({"_env_file": env_file})

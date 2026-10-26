@@ -1,0 +1,42 @@
+databases:
+  - name: backend-boilerplate-staging-db
+    plan: basic-256mb
+    postgresMajorVersion: "18"
+    region: oregon
+    ipAllowList: []
+
+services:
+  - type: web
+    name: backend-boilerplate-staging-api
+    runtime: image
+    image:
+      url: ghcr.io/khusenov/backend-boilerplate-python:main
+      creds:
+        fromRegistryCreds:
+          name: ghcr
+    plan: starter
+    region: oregon
+    healthCheckPath: /health/live
+    preDeployCommand: sh -c "alembic -x ahead=skip upgrade head && alembic -x ahead=skip check"
+    maxShutdownDelaySeconds: 45
+    domains:
+      - api.staging.khusenov.com
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: backend-boilerplate-staging-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: https://staging.khusenov.com
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: staging

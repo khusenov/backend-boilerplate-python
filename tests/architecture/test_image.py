@@ -42,6 +42,12 @@ def test_the_image_runs_the_api_command_in_exec_form(
     assert json.loads(command) == api_command("--host 0.0.0.0 --port 8000")
 
 
+def test_the_image_tells_the_app_its_commit(pytestconfig: pytest.Config) -> None:
+    environment = runtime_stage_arguments(pytestconfig.rootpath, "ENV")
+
+    assert "GIT_SHA=$GIT_SHA" in environment
+
+
 def test_make_runs_the_api_command_with_reload(pytestconfig: pytest.Config) -> None:
     command = makefile_uvicorn_command(pytestconfig.rootpath)
 
