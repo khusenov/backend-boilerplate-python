@@ -14,3 +14,13 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+    groups:
+      compose:
+        patterns: ["*"]

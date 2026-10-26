@@ -19,9 +19,12 @@ def test_app_boots(settings: Settings) -> None:
     assert schema["info"]["title"] == "backend-boilerplate"
 
 
-def test_short_production_key_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_short_production_key_fails_boot(
+    monkeypatch: pytest.MonkeyPatch, database_url: str
+) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("SECRET_KEY", "x" * 31)
+    monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
     monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
 
@@ -36,25 +39,43 @@ def test_short_production_key_fails_boot(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "input_value" not in message
 
 
-def test_empty_secret_key_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_empty_secret_key_fails_boot(
+    monkeypatch: pytest.MonkeyPatch, database_url: str
+) -> None:
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("SECRET_KEY", "")
+    monkeypatch.setenv("DATABASE_URL", database_url)
 
     with pytest.raises(ValidationError, match="Field required"):
         create_app()
 
 
-def test_missing_app_env_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_app_env_fails_boot(
+    monkeypatch: pytest.MonkeyPatch, database_url: str
+) -> None:
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.setenv("SECRET_KEY", "x" * 32)
+    monkeypatch.setenv("DATABASE_URL", database_url)
 
     with pytest.raises(ValidationError, match="Field required"):
         create_app()
 
 
-def test_unknown_app_env_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_database_url_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("SECRET_KEY", "x" * 32)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ValidationError, match="Field required"):
+        create_app()
+
+
+def test_unknown_app_env_fails_boot(
+    monkeypatch: pytest.MonkeyPatch, database_url: str
+) -> None:
     monkeypatch.setenv("APP_ENV", "staging")
     monkeypatch.setenv("SECRET_KEY", "x" * 32)
+    monkeypatch.setenv("DATABASE_URL", database_url)
 
     with pytest.raises(
         ValidationError, match="Input should be 'local', 'test' or 'production'"

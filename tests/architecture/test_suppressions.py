@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-CHECKED_DIRECTORIES = ("src", "tests")
+CHECKED_DIRECTORIES = ("migrations", "src", "tests")
 FORBIDDEN_DIRECTIVE = re.compile(
     r"type:\s*ignore|pyright:(?!\s*ignore\[)|(?:ruff|flake8|isort)\s*:"
 )

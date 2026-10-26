@@ -58,10 +58,11 @@ def test_production_lists_every_problem_at_once(
 
 
 def test_unset_proxy_and_cors_settings_trust_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_url: str
 ) -> None:
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("SECRET_KEY", "local-secret-key")
+    monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
     monkeypatch.delenv("TRUSTED_PROXY_HOPS", raising=False)
 
@@ -78,10 +79,11 @@ def test_trusted_proxy_hops_cannot_be_negative(settings: Settings) -> None:
 
 
 def test_cors_origins_are_read_as_a_comma_separated_list(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database_url: str
 ) -> None:
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.setenv("SECRET_KEY", "local-secret-key")
+    monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv(
         "CORS_ORIGINS", " https://app.example.com,,http://localhost:3000, "
     )
@@ -123,12 +125,15 @@ def test_settings_are_frozen(settings: Settings) -> None:
 
 
 def test_settings_read_only_environment_variables(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database_url: str
 ) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("APP_ENV=local\nSECRET_KEY=read-from-a-file\n")
+    env_file.write_text(
+        f"APP_ENV=local\nSECRET_KEY=read-from-a-file\nDATABASE_URL={database_url}\n"
+    )
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     with pytest.raises(ValidationError, match="Field required"):
         Settings.model_validate({"_env_file": env_file})
