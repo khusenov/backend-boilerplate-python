@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "production"]
     secret_key: SecretStr
+    database_url: SecretStr
     cors_origins: Annotated[tuple[str, ...], NoDecode] = ()
     trusted_proxy_hops: NonNegativeInt = 0
 
