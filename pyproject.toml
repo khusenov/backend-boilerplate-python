@@ -69,6 +69,7 @@ failOnWarnings = true
 
 [tool.importlinter]
 root_package = "app"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Entrypoint chain"
@@ -76,6 +77,17 @@ type = "layers"
 containers = ["app"]
 layers = ["main | (worker) | (cli)", "(bootstrap)", "modules", "core"]
 exhaustive = true
+
+[[tool.importlinter.contracts]]
+name = "HTTP stays in routers and core.http"
+type = "forbidden"
+source_modules = ["app.core.*", "app.modules"]
+forbidden_modules = ["fastapi", "starlette", "app.core.http"]
+allow_indirect_imports = true
+ignore_imports = [
+    "app.core.http.** -> fastapi",
+    "app.core.http.** -> starlette",
+]
 
 [tool.pytest]
 testpaths = ["tests"]
