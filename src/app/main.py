@@ -1,10 +1,15 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any, override
 
 from fastapi import FastAPI
 from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.bootstrap import build_resources
 from app.core.config import Settings
+from app.core.http import health
+from app.core.http.deps import AppState
 from app.core.http.middleware import (
     AccessLogMiddleware,
     BodyLimitMiddleware,
@@ -16,6 +21,7 @@ from app.core.http.middleware import (
 from app.core.http.openapi import document_problems, operation_id
 from app.core.http.problems import EXCEPTION_HANDLERS
 from app.core.logging import configure_logging
+from app.core.resources import Resources
 
 
 class App(FastAPI):
@@ -24,12 +30,27 @@ class App(FastAPI):
         return document_problems(super().openapi())
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, resources: Resources | None = None
+) -> FastAPI:
     settings = settings or Settings.model_validate({})
     configure_logging(settings)
     production = settings.app_env == "production"
-    return App(
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncGenerator[AppState]:
+        if resources is not None:
+            yield {"resources": resources}
+            return
+        built = build_resources(settings)
+        try:
+            yield {"resources": built}
+        finally:
+            await built.close()
+
+    app = App(
         title="backend-boilerplate",
+        lifespan=lifespan,
         openapi_url=None if production else "/openapi.json",
         redirect_slashes=False,
         generate_unique_id_function=operation_id,
@@ -52,3 +73,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             Middleware(BodyLimitMiddleware),
         ],
     )
+    app.include_router(health.router)
+    return app
