@@ -1,11 +1,16 @@
+import asyncio
 from collections.abc import AsyncIterator, Iterator
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import sentry_sdk
 from alembic import command
 from fastapi import FastAPI
 from httpx import AsyncClient
+from limits.aio.storage import MemoryStorage
+from limits.aio.strategies import MovingWindowRateLimiter
 from pydantic import SecretStr
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -18,6 +23,7 @@ from testcontainers.community.postgres import PostgresContainer
 from app.core.config import Settings
 from app.core.resources import Resources
 from app.main import create_app
+from app.modules.auth import public as auth
 from tests.clients import serve
 from tests.migrations import alembic_config
 from tests.scratch import ScratchBase
@@ -53,16 +59,39 @@ async def engine(database_url: str) -> AsyncIterator[AsyncEngine]:
     await engine.dispose()
 
 
+def is_committed(request: pytest.FixtureRequest) -> bool:
+    return request.node.get_closest_marker("committed") is not None
+
+
+async def truncate_tables(connection: AsyncConnection) -> None:
+    tables = await connection.scalars(
+        text(
+            "SELECT quote_ident(tablename) FROM pg_tables "
+            "WHERE schemaname = current_schema() AND tablename <> 'alembic_version'"
+        )
+    )
+    await connection.execute(text(f"TRUNCATE {', '.join(tables)}"))
+    await connection.commit()
+
+
 @pytest.fixture
-async def connection(engine: AsyncEngine) -> AsyncIterator[AsyncConnection]:
+async def connection(
+    request: pytest.FixtureRequest, engine: AsyncEngine
+) -> AsyncIterator[AsyncConnection]:
     async with engine.connect() as connection:
         transaction = await connection.begin()
         yield connection
         await transaction.rollback()
+        if is_committed(request):
+            await truncate_tables(connection)
 
 
 @pytest.fixture
-def sessionmaker(connection: AsyncConnection) -> async_sessionmaker[AsyncSession]:
+def sessionmaker(
+    request: pytest.FixtureRequest, engine: AsyncEngine, connection: AsyncConnection
+) -> async_sessionmaker[AsyncSession]:
+    if is_committed(request):
+        return async_sessionmaker(engine, expire_on_commit=False)
     return async_sessionmaker(
         connection, expire_on_commit=False, join_transaction_mode="create_savepoint"
     )
@@ -122,8 +151,16 @@ def offline_sentry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 @pytest.fixture
 def resources(
     engine: AsyncEngine, sessionmaker: async_sessionmaker[AsyncSession]
-) -> Resources:
-    return Resources(engine=engine, sessionmaker=sessionmaker)
+) -> Iterator[Resources]:
+    with ThreadPoolExecutor(4) as hashing:
+        yield Resources(
+            engine=engine,
+            sessionmaker=sessionmaker,
+            limiter=MovingWindowRateLimiter(MemoryStorage()),
+            hashing=hashing,
+            hashing_slots=asyncio.Semaphore(4),
+            authenticate=auth.authenticate,
+        )
 
 
 @pytest.fixture

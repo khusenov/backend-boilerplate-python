@@ -1,6 +1,14 @@
+from datetime import UTC, datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    PlainSerializer,
+    StringConstraints,
+    WithJsonSchema,
+)
 from pydantic.config import JsonDict
 
 Email = Annotated[
@@ -11,6 +19,18 @@ Email = Annotated[
         max_length=254,
         pattern=r"^[^@\s\x00-\x1f\x7f]+@[^@\s\x00-\x1f\x7f]+\.[^@\s\x00-\x1f\x7f]+$",
     ),
+]
+
+
+def format_timestamp(value: datetime) -> str:
+    utc = value.astimezone(UTC).isoformat(timespec="milliseconds")
+    return utc.replace("+00:00", "Z")
+
+
+Timestamp = Annotated[
+    AwareDatetime,
+    PlainSerializer(format_timestamp, return_type=str, when_used="json"),
+    WithJsonSchema({"type": "string", "format": "date-time"}),
 ]
 
 

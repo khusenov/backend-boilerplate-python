@@ -1,3 +1,5 @@
+import asyncio
+import threading
 from collections.abc import AsyncIterator
 
 import pytest
@@ -8,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from app.bootstrap import build_resources
 from app.core.config import Settings
 from app.core.resources import Resources
+from app.modules.auth import public as auth
 from tests.scratch import ScratchNote
 
 
@@ -80,3 +83,40 @@ async def test_committed_objects_stay_loaded(
         session.add(note)
 
     assert note.body == "kept"
+
+
+async def test_passwords_hash_four_at_a_time(built_resources: Resources) -> None:
+    release = threading.Event()
+    threads: list[str] = []
+
+    def hold() -> None:
+        threads.append(threading.current_thread().name)
+        release.wait(timeout=5)
+
+    loop = asyncio.get_running_loop()
+    jobs = [loop.run_in_executor(built_resources.hashing, hold) for _ in range(8)]
+    await asyncio.sleep(0.2)
+    started = len(threads)
+    release.set()
+    await asyncio.gather(*jobs)
+
+    assert started == 4
+    assert sorted(set(threads)) == [f"hashing_{n}" for n in range(4)]
+
+
+async def test_logins_get_four_hashing_slots(built_resources: Resources) -> None:
+    for _ in range(4):
+        await built_resources.hashing_slots.acquire()
+
+    assert built_resources.hashing_slots.locked()
+
+
+async def test_close_stops_the_hashing_threads(built_resources: Resources) -> None:
+    await built_resources.close()
+
+    with pytest.raises(RuntimeError, match="cannot schedule new futures"):
+        built_resources.hashing.submit(print)
+
+
+def test_principals_come_from_auth(built_resources: Resources) -> None:
+    assert built_resources.authenticate is auth.authenticate

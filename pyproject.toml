@@ -4,7 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",
+    "argon2-cffi>=25.1.0",
     "fastapi>=0.143.1",
+    "limits>=5.8.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
@@ -109,12 +111,45 @@ allow_indirect_imports = true
 ignore_imports = [
     "app.core.http.** -> fastapi",
     "app.core.http.** -> starlette",
+    "app.modules.*.router -> fastapi",
+    "app.modules.*.router -> app.core.http.**",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Modules meet only through public.py"
+type = "independence"
+modules = ["app.modules.*"]
+ignore_imports = ["app.modules.** -> app.modules.*.public"]
+
+[[tool.importlinter.contracts]]
+name = "Inside a module"
+type = "layers"
+containers = ["app.modules.*"]
+layers = [
+    "(router) | (tasks) | (public)",
+    "service",
+    "(queries) | (domain)",
+    "(schemas) : (models) : (errors)",
+]
+
+[[tool.importlinter.contracts]]
+name = "Modules are acyclic"
+type = "acyclic_siblings"
+ancestors = ["app.modules"]
+depth = 0
+
+[[tool.importlinter.contracts]]
+name = "Routers leave queries to services"
+type = "forbidden"
+source_modules = ["app.modules.*.router"]
+forbidden_modules = ["sqlalchemy", "app.modules.*.models"]
+allow_indirect_imports = true
 
 [tool.pytest]
 testpaths = ["tests"]
 strict = true
 filterwarnings = ["error"]
+markers = ["committed: commits for real, then truncates every table but alembic_version"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"

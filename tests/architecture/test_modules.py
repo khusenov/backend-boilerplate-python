@@ -25,6 +25,18 @@ from tests.architecture.inventory import (
 MODULES_ROOT = Path(app.modules.__path__[0])
 BANNED_CALLS = {"commit", "rollback", "exec_driver_sql", "literal_column"}
 SNAKE_CASE = "[a-z0-9]+(?:_[a-z0-9]+)*"
+ANATOMY = {
+    "router",
+    "schemas",
+    "service",
+    "models",
+    "errors",
+    "tasks",
+    "public",
+    "queries",
+    "domain",
+}
+CLASS_FILES = {"models.py", "schemas.py", "errors.py", "domain.py"}
 
 
 def module_names() -> list[str]:
@@ -54,6 +66,15 @@ def called_names(path: Path) -> Iterator[tuple[int, str]]:
         match node:
             case ast.Call(func=ast.Attribute(attr=name) | ast.Name(id=name)):
                 yield node.lineno, originals.get(name, name)
+
+
+def mentioned_names(path: Path) -> Iterator[tuple[int, str]]:
+    for node in ast.walk(ast.parse(path.read_text())):
+        match node:
+            case ast.Name(id=name) | ast.Attribute(attr=name) | ast.alias(name=name):
+                yield node.lineno, name
+            case ast.Constant(value=str(name)):
+                yield node.lineno, name
 
 
 def mentions_orm(annotation: object) -> bool:
@@ -166,6 +187,50 @@ def test_tables_carry_their_module_name() -> None:
 
     assert models
     assert misnamed == []
+
+
+def test_modules_hold_only_their_anatomy() -> None:
+    files = [
+        (name, info.name)
+        for name in module_names()
+        for info in pkgutil.iter_modules([str(MODULES_ROOT / name)])
+    ]
+    stray = [f"{name}.{file}" for name, file in files if file not in ANATOMY]
+
+    assert files
+    assert stray == []
+
+
+def test_use_cases_are_plain_functions() -> None:
+    paths = sorted(
+        path for path in MODULES_ROOT.rglob("*.py") if path.name not in CLASS_FILES
+    )
+    classes = [
+        f"{path.relative_to(MODULES_ROOT)}:{node.lineno}: {node.name}"
+        for path in paths
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.ClassDef)
+    ]
+
+    assert paths
+    assert classes == []
+
+
+def test_modules_authenticate_only_through_current_principal() -> None:
+    paths = sorted(
+        path
+        for path in MODULES_ROOT.rglob("*.py")
+        if path.relative_to(MODULES_ROOT).parts[0] != "auth"
+    )
+    found = [
+        f"{path.relative_to(MODULES_ROOT)}:{line}: {name}"
+        for path in paths
+        for line, name in mentioned_names(path)
+        if name == "authenticate"
+    ]
+
+    assert paths
+    assert found == []
 
 
 def test_error_codes_carry_their_module_name() -> None:

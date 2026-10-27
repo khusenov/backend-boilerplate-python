@@ -50,7 +50,8 @@ async def test_problem_schemas_replace_validation_schemas(client: AsyncClient) -
     schemas = document["components"]["schemas"]
     references = set(re.findall(r'"\$ref": "([^"]+)"', json.dumps(document)))
 
-    assert sorted(schemas) == ["GadgetCreate", "GadgetRead", "InvalidParam", "Problem"]
+    assert {"GadgetCreate", "GadgetRead", "InvalidParam", "Problem"} <= schemas.keys()
+    assert {"HTTPValidationError", "ValidationError"}.isdisjoint(schemas)
     assert references == {f"#/components/schemas/{name}" for name in schemas}
     assert [
         name for name, schema in schemas.items() if "additionalProperties" in schema
