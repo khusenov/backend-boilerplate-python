@@ -33,7 +33,7 @@ services:
       - key: CORS_ORIGINS
         value: https://staging.khusenov.com
       - key: TRUSTED_PROXY_HOPS
-        value: "1"
+        value: "2"
       - key: SENTRY_DSN
         sync: false
       - key: SENTRY_ENVIRONMENT
