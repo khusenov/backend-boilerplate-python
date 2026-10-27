@@ -11,9 +11,6 @@ services:
     runtime: image
     image:
       url: ghcr.io/khusenov/backend-boilerplate-python:main
-      creds:
-        fromRegistryCreds:
-          name: ghcr
     plan: starter
     region: oregon
     healthCheckPath: /health/live
