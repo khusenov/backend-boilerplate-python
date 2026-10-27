@@ -1,10 +1,15 @@
 import importlib
 import pkgutil
+import typing
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
+from fastapi.routing import APIRoute, iter_route_contexts
+from pydantic import BaseModel
 from sqlalchemy import Table
 from sqlalchemy.orm import Mapper
+from starlette.routing import BaseRoute
 
 import app
 from app.core.db import Base
@@ -59,3 +64,28 @@ def app_error_classes() -> list[type[AppError]]:
 
 def app_errors() -> list[type[AppError]]:
     return [error for error in app_error_classes() if hasattr(error, "code")]
+
+
+def models_in(
+    annotation: object, seen: set[type[BaseModel]] | None = None
+) -> Iterator[type[BaseModel]]:
+    seen = set() if seen is None else seen
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        if annotation in seen:
+            return
+        seen.add(annotation)
+        yield annotation
+        for field in annotation.model_fields.values():
+            yield from models_in(field.annotation, seen)
+    for part in typing.get_args(annotation):
+        yield from models_in(part, seen)
+
+
+def route_models(routes: list[BaseRoute]) -> Iterator[type[BaseModel]]:
+    for context in iter_route_contexts(routes):
+        route = context.original_route
+        if not isinstance(route, APIRoute):
+            continue
+        yield from models_in(route.response_model)
+        for param in [*route.dependant.body_params, *route.dependant.query_params]:
+            yield from models_in(param.field_info.annotation)

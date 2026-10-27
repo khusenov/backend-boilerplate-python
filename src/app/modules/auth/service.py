@@ -11,14 +11,16 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from limits import parse
 from limits.aio.strategies import MovingWindowRateLimiter
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import audit
 from app.core.db import flush
 from app.core.security import Principal
 from app.modules.auth.errors import InvalidCredentialsError, TooManyAttemptsError
 from app.modules.auth.models import Credential, LoginSession
-from app.modules.auth.schemas import Login
+from app.modules.auth.schemas import Login, PasswordSet
 from app.modules.users import public as users
 
 SESSION_LIFETIME = timedelta(days=30)
@@ -122,6 +124,14 @@ async def log_in(
             raise InvalidCredentialsError
         if PASSWORD_HASHER.check_needs_rehash(credential.password_hash):
             credential.password_hash = await hash_password(hashing, data.password)
+    audit.record(
+        session,
+        "auth.logged_in",
+        actor_id=credential.user_id,
+        target_id=credential.user_id,
+        client_ip=client_ip,
+        changes={},
+    )
     return await start_session(session, credential.user_id)
 
 
@@ -137,8 +147,34 @@ async def authenticate(session: AsyncSession, token: str) -> Principal | None:
     user = await users.get_user(session, login.user_id)
     if not user.active:
         return None
-    return Principal(user_id=user.id, session_id=login.id)
+    return Principal(user_id=user.id, session_id=login.id, role=user.role)
 
 
 async def log_out(session: AsyncSession, session_id: uuid.UUID) -> None:
     await session.execute(delete(LoginSession).where(LoginSession.id == session_id))
+
+
+async def set_password(
+    session: AsyncSession, hashing: Executor, user_id: uuid.UUID, data: PasswordSet
+) -> None:
+    password_hash = await hash_password(hashing, data.password)
+    await session.execute(
+        insert(Credential)
+        .values(user_id=user_id, password_hash=password_hash)
+        .on_conflict_do_update(
+            constraint="uq_auth_credentials_user_id",
+            set_={
+                "password_hash": password_hash,
+                "updated_at": func.statement_timestamp(),
+            },
+        )
+    )
+    await session.execute(delete(LoginSession).where(LoginSession.user_id == user_id))
+
+
+async def create_admin(
+    session: AsyncSession, hashing: Executor, email: str, name: str, data: PasswordSet
+) -> users.UserDTO:
+    admin = await users.create_admin(session, email, name)
+    await set_password(session, hashing, admin.id, data)
+    return admin

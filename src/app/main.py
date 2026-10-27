@@ -24,6 +24,7 @@ from app.core.logging import configure_logging
 from app.core.resources import Resources
 from app.core.sentry import configure_sentry, flush_sentry
 from app.modules.auth import router as auth
+from app.modules.users import router as users
 
 
 class App(FastAPI):
@@ -79,6 +80,8 @@ def create_app(
             Middleware(BodyLimitMiddleware),
         ],
     )
-    app.include_router(health.router)
+    app.include_router(health.anonymous_router)
+    app.include_router(auth.anonymous_router, prefix="/v1")
     app.include_router(auth.router, prefix="/v1")
+    app.include_router(users.router, prefix="/v1")
     return app

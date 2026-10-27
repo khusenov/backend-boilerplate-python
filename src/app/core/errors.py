@@ -36,3 +36,7 @@ class NotAuthenticatedError(UnauthorizedError):
 
 class UntrustedOriginError(ForbiddenError):
     code = "untrusted_origin"
+
+
+class PermissionDeniedError(ForbiddenError):
+    code = "permission_denied"

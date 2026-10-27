@@ -6,8 +6,10 @@ from limits.aio.strategies import MovingWindowRateLimiter
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.resources import Resources
 from app.modules.auth.errors import TooManyAttemptsError
 from app.modules.auth.models import Credential
+from app.modules.auth.schemas import PasswordSet
 from app.modules.auth.service import (
     LOGINS_PER_ADDRESS,
     LOGINS_PER_EMAIL,
@@ -17,8 +19,10 @@ from app.modules.auth.service import (
     find_credential,
     network_key,
     password_matches,
+    set_password,
 )
 from tests.factories import PASSWORD, make_credential, make_user
+from tests.statements import first_words, record_statements
 
 EMAIL = "ada@example.com"
 
@@ -143,3 +147,23 @@ async def test_credential_lookups_refresh_the_row(session: AsyncSession) -> None
     await find_credential(session, user.email)
 
     assert credential.password_hash == "changed"
+
+
+async def test_setting_a_password_is_one_upsert(
+    session: AsyncSession, resources: Resources
+) -> None:
+    user = await make_user(session)
+    statements = await record_statements(session)
+
+    await set_password(
+        session, resources.hashing, user.id, PasswordSet(password=PASSWORD)
+    )
+
+    assert list(map(first_words, statements)) == [
+        "INSERT INTO auth_credentials",
+        "DELETE FROM auth_sessions",
+    ]
+    assert (
+        " ON CONFLICT ON CONSTRAINT uq_auth_credentials_user_id DO UPDATE SET "
+        in statements[0]
+    )

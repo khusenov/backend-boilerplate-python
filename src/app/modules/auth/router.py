@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Response
 
+from app.core.http.authorization import AnonymousRoute, require
 from app.core.http.deps import (
     SESSION_COOKIE,
     ClientIp,
@@ -10,15 +11,17 @@ from app.core.http.deps import (
     Limiter,
     require_trusted_origin,
 )
+from app.core.security import Permission
 from app.modules.auth import service
 from app.modules.auth.schemas import Login, TokenRead
 
 SESSION_MAX_AGE = int(service.SESSION_LIFETIME.total_seconds())
 
+anonymous_router = APIRouter(prefix="/auth", route_class=AnonymousRoute)
 router = APIRouter(prefix="/auth")
 
 
-@router.post(
+@anonymous_router.post(
     "/session",
     status_code=204,
     response_class=Response,
@@ -46,7 +49,7 @@ async def create_session(
     )
 
 
-@router.post("/tokens", status_code=201)
+@anonymous_router.post("/tokens", status_code=201)
 async def create_token(
     body: Login,
     session: DbSession,
@@ -61,7 +64,12 @@ async def create_token(
     return TokenRead(token=token, expires_at=login.expires_at)
 
 
-@router.delete("/session", status_code=204, response_class=Response)
+@router.delete(
+    "/session",
+    status_code=204,
+    response_class=Response,
+    dependencies=[require(Permission.AUTH_LOG_OUT)],
+)
 async def delete_session(
     principal: CurrentPrincipal, session: DbSession, response: Response
 ) -> None:

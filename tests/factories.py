@@ -1,9 +1,11 @@
 import secrets
+import uuid
 from datetime import UTC, datetime
 from itertools import count
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import Principal
 from app.modules.auth.models import Credential, LoginSession
 from app.modules.auth.service import PASSWORD_HASHER, SESSION_LIFETIME, hash_token
 from app.modules.users.models import User
@@ -44,3 +46,7 @@ async def make_login_session(
     session.add(LoginSession(**fields | overrides))
     await session.flush()
     return token
+
+
+def principal_for(user: User) -> Principal:
+    return Principal(user_id=user.id, session_id=uuid.uuid7(), role=user.role)

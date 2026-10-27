@@ -3,6 +3,7 @@ from enum import StrEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
+from app.core.security import Role
 
 
 class UserStatus(StrEnum):
@@ -15,6 +16,7 @@ class User(Base):
 
     email: Mapped[str] = mapped_column(unique=True)
     name: Mapped[str]
+    role: Mapped[Role] = mapped_column(server_default=Role.MEMBER)
     status: Mapped[UserStatus] = mapped_column(default=UserStatus.ACTIVE)
 
     @property

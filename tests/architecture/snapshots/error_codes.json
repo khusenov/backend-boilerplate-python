@@ -6,6 +6,7 @@
   "internal_server_error": 500,
   "method_not_allowed": 405,
   "not_found": 404,
+  "permission_denied": 403,
   "service_unavailable": 503,
   "unauthenticated": 401,
   "untrusted_origin": 403,

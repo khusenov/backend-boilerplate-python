@@ -18,10 +18,11 @@ from sqlalchemy.pool import QueuePool
 
 from app.core.http.deps import SESSION_COOKIE
 from app.core.resources import Resources
+from app.core.security import Role
 from app.modules.auth.models import Credential, LoginSession
 from app.modules.auth.service import PASSWORD_HASHER, dummy_hash
-from app.modules.users import service as users
 from app.modules.users.models import User, UserStatus
+from tests.audit import audit_rows
 from tests.clients import bearer, connect, problem
 from tests.factories import PASSWORD, make_credential, make_login_session, make_user
 
@@ -201,6 +202,34 @@ async def test_logins_keep_current_password_hashes(
     assert credential.password_hash == current
 
 
+@pytest.mark.parametrize(
+    ("path", "headers"),
+    [("/v1/auth/tokens", {}), ("/v1/auth/session", TRUSTED)],
+    ids=["token", "cookie"],
+)
+async def test_logins_write_one_audit_row(
+    client: AsyncClient,
+    session: AsyncSession,
+    user: User,
+    path: str,
+    headers: dict[str, str],
+) -> None:
+    traced = {"X-Forwarded-For": "203.0.113.7"}
+    response = await client.post(path, json=login(user), headers=headers | traced)
+
+    assert response.is_success
+    assert await audit_rows(session) == [
+        (
+            user.id,
+            "auth.logged_in",
+            user.id,
+            "203.0.113.7",
+            response.headers["x-request-id"],
+            {},
+        )
+    ]
+
+
 async def test_revoked_cookie_sessions_get_401(client: AsyncClient, user: User) -> None:
     await client.post("/v1/auth/session", json=login(user), headers=TRUSTED)
     token = client.cookies[SESSION_COOKIE]
@@ -238,6 +267,28 @@ async def test_logouts_end_only_the_current_session(
     assert response.status_code == 204
 
 
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        (None, (401, "unauthenticated")),
+        (Role.MEMBER, (204, None)),
+        (Role.ADMIN, (204, None)),
+    ],
+    ids=["anonymous", "member", "admin"],
+)
+async def test_each_role_gets_its_logout_answer(
+    client: AsyncClient,
+    session: AsyncSession,
+    role: Role | None,
+    expected: tuple[int, str | None],
+) -> None:
+    caller = await make_user(session, role=role or Role.MEMBER)
+    headers = {} if role is None else bearer(await make_login_session(session, caller))
+    response = await client.delete("/v1/auth/session", headers=headers)
+
+    assert problem(response) == expected
+
+
 async def test_expired_sessions_get_401(
     client: AsyncClient, session: AsyncSession, user: User
 ) -> None:
@@ -252,7 +303,8 @@ async def test_deactivated_users_sessions_get_401(
     client: AsyncClient, session: AsyncSession, user: User
 ) -> None:
     token = await make_login_session(session, user)
-    await users.deactivate_user(session, user.id)
+    user.status = UserStatus.DEACTIVATED
+    await session.flush()
     response = await client.delete("/v1/auth/session", headers=bearer(token))
 
     assert problem(response) == (401, "unauthenticated")
