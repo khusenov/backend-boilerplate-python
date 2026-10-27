@@ -6,18 +6,19 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.http.authorization import AnonymousRoute
 from app.core.http.deps import get_resources
 
 logger = structlog.stdlib.get_logger(__name__)
-router = APIRouter(prefix="/health")
+anonymous_router = APIRouter(prefix="/health", route_class=AnonymousRoute)
 
 
-@router.get("/live", response_class=Response)
+@anonymous_router.get("/live", response_class=Response)
 async def liveness() -> Response:
     return Response()
 
 
-@router.get("/ready", response_class=Response)
+@anonymous_router.get("/ready", response_class=Response)
 async def readiness(request: Request) -> Response:
     engine = get_resources(request).engine
     try:

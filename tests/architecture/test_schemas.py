@@ -5,6 +5,8 @@ from collections.abc import Iterator, Mapping
 from datetime import datetime
 from typing import Any
 
+from fastapi.dependencies.utils import get_flat_params
+from fastapi.routing import APIRoute, iter_route_contexts
 from pydantic import (
     AwareDatetime,
     BaseModel,
@@ -101,6 +103,23 @@ def test_timestamps_use_the_timestamp_type() -> None:
     ]
 
     assert schemas
+    assert bare == []
+
+
+def test_route_parameters_use_the_timestamp_type(settings: Settings) -> None:
+    params = [
+        (context.path, param)
+        for context in iter_route_contexts(create_app(settings).routes)
+        if isinstance(context.original_route, APIRoute)
+        for param in get_flat_params(context.original_route.dependant)
+    ]
+    bare = [
+        f"{path} {param.name}"
+        for path, param in params
+        if has_bare_datetime(param.field_info.annotation)
+    ]
+
+    assert params
     assert bare == []
 
 

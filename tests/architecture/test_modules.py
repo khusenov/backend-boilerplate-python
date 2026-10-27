@@ -12,18 +12,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules
 from app import bootstrap
+from app.core.audit import AuditEvent
+from app.core.config import Settings
 from app.core.db import Base
 from app.core.errors import AppError
 from app.core.schemas import Schema
+from app.main import create_app
 from tests.architecture.inventory import (
     app_error_classes,
     app_errors,
     app_models,
     module_of,
+    route_models,
 )
 
+APP_ROOT = Path(app.__path__[0])
 MODULES_ROOT = Path(app.modules.__path__[0])
 BANNED_CALLS = {"commit", "rollback", "exec_driver_sql", "literal_column"}
+SQL_TABLE = re.compile(r"\b(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+(\w+)", re.IGNORECASE)
 SNAKE_CASE = "[a-z0-9]+(?:_[a-z0-9]+)*"
 ANATOMY = {
     "router",
@@ -75,6 +81,36 @@ def mentioned_names(path: Path) -> Iterator[tuple[int, str]]:
                 yield node.lineno, name
             case ast.Constant(value=str(name)):
                 yield node.lineno, name
+
+
+def quoted_names(path: Path) -> Iterator[tuple[int, str]]:
+    for node in ast.walk(ast.parse(path.read_text())):
+        match node:
+            case ast.Constant(value=str(text)):
+                yield node.lineno, text
+                for table in SQL_TABLE.findall(text):
+                    yield node.lineno, table
+
+
+def owner_of(path: Path) -> str | None:
+    return module_of(".".join(path.relative_to(APP_ROOT.parent).with_suffix("").parts))
+
+
+def upserts(path: Path) -> Iterator[ast.Call]:
+    for node in ast.walk(ast.parse(path.read_text())):
+        match node:
+            case ast.Call(func=ast.Attribute(attr="on_conflict_do_update")):
+                yield node
+
+
+def updated_columns(upsert: ast.Call) -> list[object]:
+    return [
+        key.value
+        for keyword in upsert.keywords
+        if keyword.arg == "set_" and isinstance(keyword.value, ast.Dict)
+        for key in keyword.value.keys
+        if isinstance(key, ast.Constant)
+    ]
 
 
 def mentions_orm(annotation: object) -> bool:
@@ -136,6 +172,49 @@ def test_modules_leave_transactions_and_raw_sql_to_core() -> None:
     assert found == []
 
 
+def test_modules_leave_audit_events_to_core() -> None:
+    paths = sorted(MODULES_ROOT.rglob("*.py"))
+    found = [
+        f"{path.relative_to(MODULES_ROOT)}:{line}: {name}"
+        for path in paths
+        for line, name in mentioned_names(path)
+        if name == AuditEvent.__name__ or AuditEvent.__tablename__ in name
+    ]
+
+    assert paths
+    assert found == []
+
+
+def test_tables_are_named_only_by_their_owner() -> None:
+    owners = {model.table.name: model.module for model in app_models()}
+    paths = sorted(APP_ROOT.rglob("*.py"))
+    found = [
+        f"{path.relative_to(APP_ROOT)}:{line}: {name}"
+        for path in paths
+        for line, name in quoted_names(path)
+        if name in owners and owners[name] != owner_of(path)
+    ]
+
+    assert owners
+    assert found == []
+
+
+def test_upserts_stamp_updated_at() -> None:
+    found = [
+        (path, upsert)
+        for path in sorted(APP_ROOT.rglob("*.py"))
+        for upsert in upserts(path)
+    ]
+    stale = [
+        f"{path.relative_to(APP_ROOT)}:{upsert.lineno}"
+        for path, upsert in found
+        if "updated_at" not in updated_columns(upsert)
+    ]
+
+    assert found
+    assert stale == []
+
+
 def test_public_modules_hide_internals() -> None:
     publics = public_modules()
     exposed = [
@@ -175,6 +254,21 @@ def test_public_modules_export_session_taking_functions_and_dtos() -> None:
 
     assert publics
     assert unexpected == []
+
+
+def test_public_dtos_never_serve_routes(settings: Settings) -> None:
+    served = set(route_models(create_app(settings).routes))
+    dtos = [
+        getattr(public, name)
+        for public in public_modules()
+        for name in public.__all__
+        if is_dto(getattr(public, name))
+    ]
+    doubled = [f"{dto.__module__}.{dto.__qualname__}" for dto in dtos if dto in served]
+
+    assert served
+    assert dtos
+    assert doubled == []
 
 
 def test_tables_carry_their_module_name() -> None:
