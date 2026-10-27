@@ -1,6 +1,5 @@
 import json
 import re
-import shlex
 from pathlib import Path
 from typing import get_args
 
@@ -89,7 +88,7 @@ def test_deploys_migrate_with_the_rollback_safe_command(
     compose = (pytestconfig.rootpath / "compose.yaml").read_text()
     [compose_command] = COMPOSE_MIGRATE.findall(compose)
     pre_deploy_commands = {
-        tuple(shlex.split(service["preDeployCommand"]))
+        tuple(service["preDeployCommand"].split(" ", 2))
         for service in services(pytestconfig.rootpath)
         if "preDeployCommand" in service
     }
