@@ -14,7 +14,8 @@ services:
     plan: starter
     region: oregon
     healthCheckPath: /health/live
-    preDeployCommand: sh -c "alembic -x ahead=skip upgrade head && alembic -x ahead=skip check"
+    # Render hands everything after "sh -c" to the shell verbatim, so quotes would become part of the script.
+    preDeployCommand: sh -c alembic -x ahead=skip upgrade head && alembic -x ahead=skip check
     maxShutdownDelaySeconds: 45
     domains:
       - api.staging.khusenov.com
