@@ -23,6 +23,7 @@ from app.core.http.problems import EXCEPTION_HANDLERS
 from app.core.logging import configure_logging
 from app.core.resources import Resources
 from app.core.sentry import configure_sentry, flush_sentry
+from app.modules.auth import router as auth
 
 
 class App(FastAPI):
@@ -43,11 +44,11 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncGenerator[AppState]:
         try:
             if resources is not None:
-                yield {"resources": resources}
+                yield {"settings": settings, "resources": resources}
                 return
             built = build_resources(settings)
             try:
-                yield {"resources": built}
+                yield {"settings": settings, "resources": built}
             finally:
                 await built.close()
         finally:
@@ -79,4 +80,5 @@ def create_app(
         ],
     )
     app.include_router(health.router)
+    app.include_router(auth.router, prefix="/v1")
     return app

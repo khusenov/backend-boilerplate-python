@@ -1,9 +1,11 @@
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
 
-from app.core.schemas import Email, Schema
+from app.core.schemas import Email, Schema, Timestamp
 
 
 class Widget(Schema):
@@ -12,6 +14,10 @@ class Widget(Schema):
 
 class Contact(Schema):
     email: Email
+
+
+class Event(Schema):
+    at: Timestamp
 
 
 def test_unknown_fields_are_rejected() -> None:
@@ -54,3 +60,35 @@ def test_emails_are_trimmed_and_lowercased() -> None:
 def test_malformed_emails_are_rejected(email: str) -> None:
     with pytest.raises(ValidationError):
         Contact(email=email)
+
+
+@pytest.mark.parametrize(
+    ("at", "text"),
+    [
+        (
+            datetime(2026, 10, 14, 11, 30, 0, 123456, timezone(timedelta(hours=2))),
+            "2026-10-14T09:30:00.123Z",
+        ),
+        (datetime(2026, 10, 14, 9, 30, tzinfo=UTC), "2026-10-14T09:30:00.000Z"),
+    ],
+)
+def test_timestamps_are_utc_with_milliseconds(at: datetime, text: str) -> None:
+    assert Event(at=at).model_dump(mode="json") == {"at": text}
+
+
+def test_timestamps_must_be_aware() -> None:
+    with pytest.raises(ValidationError, match="timezone_aware"):
+        Event.model_validate({"at": "2026-10-14T09:30:00"})
+
+
+@pytest.mark.parametrize("mode", ["validation", "serialization"])
+def test_timestamps_are_documented_as_date_times(
+    mode: Literal["validation", "serialization"],
+) -> None:
+    schema = Event.model_json_schema(mode=mode)
+
+    assert schema["properties"]["at"] == {
+        "format": "date-time",
+        "title": "At",
+        "type": "string",
+    }

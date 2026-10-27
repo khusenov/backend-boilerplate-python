@@ -24,3 +24,13 @@ async def test_other_modules_read_users_as_dtos(
 async def test_a_missing_user_is_not_found(session: AsyncSession) -> None:
     with pytest.raises(UserNotFoundError):
         await users.get_user(session, uuid.uuid7())
+
+
+async def test_other_modules_find_users_by_email(session: AsyncSession) -> None:
+    user = await make_user(session, email="ada@example.com")
+
+    found = await users.find_user_by_email(session, "ada@example.com")
+    missing = await users.find_user_by_email(session, "bob@example.com")
+
+    assert found == users.UserDTO(id=user.id, email="ada@example.com", active=True)
+    assert missing is None

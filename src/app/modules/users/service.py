@@ -28,6 +28,10 @@ async def get_user(
     return user
 
 
+async def find_user_by_email(session: AsyncSession, email: str) -> User | None:
+    return await session.scalar(select(User).where(User.email == email))
+
+
 async def list_users(session: AsyncSession, query: PageQuery) -> Page[User]:
     statement = select(User).order_by(User.id.desc()).limit(query.limit + 1)
     if query.cursor is not None:

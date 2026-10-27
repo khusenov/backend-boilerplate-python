@@ -41,16 +41,20 @@ def app_models() -> list[Model]:
     ]
 
 
-def app_error_classes() -> list[type[AppError]]:
+def app_subclasses[T](base: type[T]) -> list[type[T]]:
     import_app()
-    classes: list[type[AppError]] = []
-    pending: list[type[AppError]] = [AppError]
+    classes: list[type[T]] = []
+    pending: list[type[T]] = [base]
     while pending:
-        error = pending.pop()
-        pending.extend(error.__subclasses__())
-        if error.__module__.startswith("app."):
-            classes.append(error)
+        cls = pending.pop()
+        pending.extend(cls.__subclasses__())
+        if cls.__module__.startswith("app."):
+            classes.append(cls)
     return classes
+
+
+def app_error_classes() -> list[type[AppError]]:
+    return app_subclasses(AppError)
 
 
 def app_errors() -> list[type[AppError]]:

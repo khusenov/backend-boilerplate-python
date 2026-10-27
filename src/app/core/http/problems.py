@@ -108,7 +108,9 @@ async def handle_http_exception(_request: Request, error: HTTPException) -> Resp
 
 
 async def handle_app_error(_request: Request, error: AppError) -> Response:
-    return problem_response(error.status, error.code, detail=str(error) or None)
+    return problem_response(
+        error.status, error.code, detail=str(error) or None, headers=error.headers
+    )
 
 
 type ExceptionHandler = Callable[[Request, Any], Coroutine[Any, Any, Response]]

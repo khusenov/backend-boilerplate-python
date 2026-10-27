@@ -1,10 +1,14 @@
 {
+  "auth.invalid_credentials": 401,
+  "auth.too_many_attempts": 429,
   "bad_request": 400,
   "content_too_large": 413,
   "internal_server_error": 500,
   "method_not_allowed": 405,
   "not_found": 404,
   "service_unavailable": 503,
+  "unauthenticated": 401,
+  "untrusted_origin": 403,
   "users.email_taken": 409,
   "users.not_found": 404,
   "validation_failed": 422

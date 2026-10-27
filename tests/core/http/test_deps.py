@@ -44,6 +44,12 @@ async def create_uncommitted_note(session: DbSession) -> None:
     event.listen(session.sync_session, "before_commit", refuse_commit)
 
 
+@router.get("/notes")
+async def create_note_on_read(session: DbSession) -> None:
+    session.add(ScratchNote(body="read"))
+    await session.flush()
+
+
 @pytest.fixture
 def app(app: FastAPI) -> FastAPI:
     app.include_router(router)
@@ -77,6 +83,16 @@ async def test_a_failed_commit_fails_the_request(
 ) -> None:
     async with serve(app, raise_app_exceptions=False) as client:
         response = await client.post("/uncommitted-notes")
+
+    assert response.status_code == 500
+    assert await note_bodies(connection) == []
+
+
+async def test_gets_never_change_state(
+    app: FastAPI, connection: AsyncConnection
+) -> None:
+    async with serve(app, raise_app_exceptions=False) as client:
+        response = await client.get("/notes")
 
     assert response.status_code == 500
     assert await note_bodies(connection) == []
