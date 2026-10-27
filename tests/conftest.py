@@ -69,6 +69,14 @@ def sessionmaker(connection: AsyncConnection) -> async_sessionmaker[AsyncSession
 
 
 @pytest.fixture
+async def session(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    async with sessionmaker() as session:
+        yield session
+
+
+@pytest.fixture
 async def scratch_tables(connection: AsyncConnection) -> None:
     await connection.run_sync(ScratchBase.metadata.create_all)
 

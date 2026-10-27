@@ -3,11 +3,15 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from app.core.schemas import Schema
+from app.core.schemas import Email, Schema
 
 
 class Widget(Schema):
     name: str
+
+
+class Contact(Schema):
+    email: Email
 
 
 def test_unknown_fields_are_rejected() -> None:
@@ -30,3 +34,23 @@ def test_schemas_read_attributes() -> None:
 
 def test_json_schema_allows_additional_properties() -> None:
     assert "additionalProperties" not in Widget.model_json_schema()
+
+
+def test_emails_are_trimmed_and_lowercased() -> None:
+    assert Contact(email=" Ada@Example.COM ").email == "ada@example.com"
+
+
+@pytest.mark.parametrize(
+    "email",
+    [
+        "ada",
+        "ada@example",
+        "@example.com",
+        "a da@example.com",
+        "ada\x00@example.com",
+        "x" * 243 + "@example.com",
+    ],
+)
+def test_malformed_emails_are_rejected(email: str) -> None:
+    with pytest.raises(ValidationError):
+        Contact(email=email)

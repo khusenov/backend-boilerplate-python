@@ -3,9 +3,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.config import Settings
 from app.core.db import Base, psycopg_url
 from app.core.resources import Resources
+from app.modules.users import models as users_models
 
 API_TIMEOUTS = "-c statement_timeout=5s -c idle_in_transaction_session_timeout=30s"
 
+MODELS = (users_models,)
 metadata = Base.metadata
 
 
