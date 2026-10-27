@@ -17,9 +17,10 @@ from pydantic import (
 from pydantic_settings import BaseSettings
 
 from app.core.config import Settings
+from app.core.jobs.queue import Message
 from app.core.schemas import Schema, Timestamp
 from app.main import create_app
-from tests.architecture.inventory import app_subclasses
+from tests.architecture.inventory import app_subclasses, route_models
 
 STRING_BOUNDS = {"maxLength", "enum", "const"}
 BOUNDED_FORMATS = {"uuid", "date-time"}
@@ -81,16 +82,28 @@ def unbounded_inputs(
             yield from unbounded_inputs(child, components, where)
 
 
-def test_models_subclass_schema() -> None:
+def test_models_subclass_schema_or_message() -> None:
     models = app_subclasses(BaseModel)
     loose = [
         f"{model.__module__}.{model.__qualname__}"
         for model in models
-        if not issubclass(model, Schema | BaseSettings)
+        if not issubclass(model, Schema | Message | BaseSettings)
     ]
 
     assert models
     assert loose == []
+
+
+def test_routes_speak_schemas_never_messages(settings: Settings) -> None:
+    models = list(route_models(create_app(settings).routes))
+    foreign = [
+        f"{model.__module__}.{model.__qualname__}"
+        for model in models
+        if not issubclass(model, Schema)
+    ]
+
+    assert models
+    assert foreign == []
 
 
 def test_timestamps_use_the_timestamp_type() -> None:

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import NotAuthenticatedError, UntrustedOriginError
+from app.core.jobs.queue import JobQueue
 from app.core.resources import Resources
 from app.core.security import Principal
 
@@ -45,6 +46,13 @@ async def db_session(request: Request) -> AsyncIterator[AsyncSession]:
 
 
 DbSession = Annotated[AsyncSession, Depends(db_session, scope="function")]
+
+
+async def get_jobs(request: Request) -> JobQueue:
+    return get_resources(request).jobs
+
+
+Jobs = Annotated[JobQueue, Depends(get_jobs)]
 
 
 async def get_limiter(request: Request) -> MovingWindowRateLimiter:

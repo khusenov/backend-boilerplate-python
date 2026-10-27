@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from app.bootstrap import build_resources
+from app.bootstrap import build_resources, job_app
 from app.core.config import Settings
 from app.core.resources import Resources
 from app.modules.auth import public as auth
@@ -120,3 +120,7 @@ async def test_close_stops_the_hashing_threads(built_resources: Resources) -> No
 
 def test_principals_come_from_auth(built_resources: Resources) -> None:
     assert built_resources.authenticate is auth.authenticate
+
+
+def test_jobs_share_the_process_job_app(built_resources: Resources) -> None:
+    assert built_resources.jobs.app is job_app

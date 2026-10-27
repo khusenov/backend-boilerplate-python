@@ -80,9 +80,8 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           docker tag backend-boilerplate "$image:$GITHUB_SHA"
-          docker tag backend-boilerplate "$image:main"
           echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          docker push --all-tags "$image"
+          docker push "$image:$GITHUB_SHA"
           ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image:$GITHUB_SHA")
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - run: |
@@ -92,6 +91,13 @@ jobs:
           sudo install cli_v2.29.0 /usr/local/bin/render
       - env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_WORKER_SERVICE_ID: ${{ vars.RENDER_WORKER_SERVICE_ID }}
           RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
           IMAGE: ${{ steps.push.outputs.ref }}
-        run: render deploys create "$RENDER_SERVICE_ID" --image "$IMAGE" --wait --confirm --output text
+        run: |
+          render deploys create "$RENDER_WORKER_SERVICE_ID" --image "$IMAGE" --wait --confirm --output text
+          render deploys create "$RENDER_SERVICE_ID" --image "$IMAGE" --wait --confirm --output text
+      - run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker tag backend-boilerplate "$image:main"
+          docker push "$image:main"

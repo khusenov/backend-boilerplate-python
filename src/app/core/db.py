@@ -22,6 +22,11 @@ def psycopg_url(database_url: SecretStr) -> URL:
     return make_url(raw).set(drivername="postgresql+psycopg")
 
 
+def conninfo(database_url: SecretStr) -> str:
+    _, address = database_url.get_secret_value().split("://", 1)
+    return f"postgresql://{address}"
+
+
 def enum_values(enum_class: type[enum.Enum]) -> list[str]:
     return [member.value for member in enum_class]
 

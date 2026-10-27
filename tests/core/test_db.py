@@ -1,10 +1,11 @@
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 from pydantic import SecretStr
 from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import flush, psycopg_url
+from app.core.db import conninfo, flush, psycopg_url
 from app.core.errors import ConflictError
 from tests.scratch import ScratchNote, ScratchTag
 
@@ -35,6 +36,31 @@ def test_database_urls_use_psycopg(scheme: str) -> None:
         "postgresql+psycopg://app:secret@db.example.com:5432/app?sslmode=require"
     )
     assert "secret" not in str(url)
+
+
+@pytest.mark.parametrize("scheme", ["postgres", "postgresql", "postgresql+psycopg"])
+def test_libpq_urls_drop_the_driver(scheme: str) -> None:
+    raw = f"{scheme}://app:secret@db.example.com:5432/app?sslmode=require"
+
+    assert conninfo(SecretStr(raw)) == (
+        "postgresql://app:secret@db.example.com:5432/app?sslmode=require"
+    )
+
+
+def test_libpq_urls_keep_their_escapes() -> None:
+    raw = (
+        "postgresql+psycopg://app:p%20ss@db.example.com:5432/app"
+        "?options=-c%20statement_timeout%3D7s"
+    )
+
+    assert conninfo_to_dict(conninfo(SecretStr(raw))) == {
+        "user": "app",
+        "password": "p ss",
+        "host": "db.example.com",
+        "port": "5432",
+        "dbname": "app",
+        "options": "-c statement_timeout=7s",
+    }
 
 
 def test_ids_come_first_and_timestamps_last() -> None:

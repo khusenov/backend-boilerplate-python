@@ -5,31 +5,13 @@ databases:
     region: oregon
     ipAllowList: []
 
-services:
-  - type: web
-    name: backend-boilerplate-staging-api
-    runtime: image
-    image:
-      url: ghcr.io/khusenov/backend-boilerplate-python:main
-    plan: starter
-    region: oregon
-    healthCheckPath: /health/live
-    # Render hands everything after "sh -c" to the shell verbatim, so quotes would become part of the script.
-    preDeployCommand: sh -c alembic -x ahead=skip upgrade head && alembic -x ahead=skip check
-    maxShutdownDelaySeconds: 45
-    domains:
-      - api.staging.khusenov.com
+envVarGroups:
+  - name: backend-boilerplate-staging
     envVars:
-      - key: PORT
-        value: "8000"
       - key: APP_ENV
         value: production
       - key: SECRET_KEY
         generateValue: true
-      - key: DATABASE_URL
-        fromDatabase:
-          name: backend-boilerplate-staging-db
-          property: connectionString
       - key: CORS_ORIGINS
         value: https://staging.khusenov.com
       - key: TRUSTED_PROXY_HOPS
@@ -38,3 +20,42 @@ services:
         sync: false
       - key: SENTRY_ENVIRONMENT
         value: staging
+
+services:
+  - type: worker
+    name: backend-boilerplate-staging-worker
+    runtime: image
+    image:
+      url: ghcr.io/khusenov/backend-boilerplate-python:main
+    plan: starter
+    region: oregon
+    dockerCommand: python -m app.worker
+    # Render hands everything after "sh -c" to the shell verbatim, so quotes would become part of the script.
+    preDeployCommand: sh -c alembic -x ahead=skip upgrade head && alembic -x ahead=skip check
+    maxShutdownDelaySeconds: 45
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: backend-boilerplate-staging-db
+          property: connectionString
+      - fromGroup: backend-boilerplate-staging
+
+  - type: web
+    name: backend-boilerplate-staging-api
+    runtime: image
+    image:
+      url: ghcr.io/khusenov/backend-boilerplate-python:main
+    plan: starter
+    region: oregon
+    healthCheckPath: /health/live
+    maxShutdownDelaySeconds: 45
+    domains:
+      - api.staging.khusenov.com
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: backend-boilerplate-staging-db
+          property: connectionString
+      - fromGroup: backend-boilerplate-staging

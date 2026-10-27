@@ -8,11 +8,14 @@ from sentry_sdk.types import Event, Hint
 
 from app.core.config import Settings
 
+TAGGED_CONTEXT = ("request_id", "job_id")
 
-def tag_request_id(event: Event, _hint: Hint) -> Event:
+
+def tag_context(event: Event, _hint: Hint) -> Event:
     context = structlog.contextvars.get_contextvars()
-    if "request_id" in context:
-        event.setdefault("tags", {})["request_id"] = context["request_id"]
+    for key in TAGGED_CONTEXT:
+        if key in context:
+            event.setdefault("tags", {})[key] = str(context[key])
     return event
 
 
@@ -30,7 +33,7 @@ def configure_sentry(settings: Settings) -> None:
         ),
         in_app_include=["app"],
         integrations=[LoggingIntegration(level=None, event_level=None)],
-        before_send=tag_request_id,
+        before_send=tag_context,
     )
 
 
