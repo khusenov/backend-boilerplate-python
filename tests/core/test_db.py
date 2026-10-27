@@ -1,20 +1,28 @@
-from collections.abc import AsyncIterator
-
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import event, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import psycopg_url
-from tests.scratch import ScratchNote
+from app.core.db import flush, psycopg_url
+from app.core.errors import ConflictError
+from tests.scratch import ScratchNote, ScratchTag
+
+
+class TagTakenError(ConflictError):
+    code = "tags.taken"
 
 
 @pytest.fixture
-async def session(
-    scratch_tables: None, sessionmaker: async_sessionmaker[AsyncSession]
-) -> AsyncIterator[AsyncSession]:
-    async with sessionmaker() as session:
-        yield session
+def session(scratch_tables: None, session: AsyncSession) -> AsyncSession:
+    return session
+
+
+async def add_duplicate_tags(session: AsyncSession) -> None:
+    note = ScratchNote(body="tagged")
+    session.add(note)
+    await session.flush()
+    session.add_all([ScratchTag(note_id=note.id, name="draft") for _ in range(2)])
 
 
 @pytest.mark.parametrize("scheme", ["postgres", "postgresql", "postgresql+psycopg2"])
@@ -115,3 +123,30 @@ async def test_constraints_are_named_by_the_convention(session: AsyncSession) ->
         "pk_scratch_tags",
         "uq_scratch_tags_note_id_name",
     ]
+
+
+async def test_flush_raises_the_error_mapped_to_the_constraint(
+    session: AsyncSession,
+) -> None:
+    await add_duplicate_tags(session)
+
+    with pytest.raises(TagTakenError) as caught:
+        await flush(session, {"uq_scratch_tags_note_id_name": TagTakenError})
+
+    assert isinstance(caught.value.__cause__, IntegrityError)
+
+
+async def test_flush_reraises_unmapped_violations(session: AsyncSession) -> None:
+    await add_duplicate_tags(session)
+
+    with pytest.raises(IntegrityError, match="uq_scratch_tags_note_id_name"):
+        await flush(session, {"ck_scratch_tags_name_not_empty": TagTakenError})
+
+
+async def test_flush_reraises_violations_without_a_constraint_name(
+    session: AsyncSession,
+) -> None:
+    session.add(ScratchNote(body=None))
+
+    with pytest.raises(IntegrityError, match="NotNullViolation"):
+        await flush(session, {"uq_scratch_tags_note_id_name": TagTakenError})

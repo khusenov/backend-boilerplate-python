@@ -21,6 +21,7 @@ HTTP_ERROR_CODES = {
     HTTPStatus.CONTENT_TOO_LARGE: "content_too_large",
     HTTPStatus.UNPROCESSABLE_CONTENT: "validation_failed",
     HTTPStatus.INTERNAL_SERVER_ERROR: "internal_server_error",
+    HTTPStatus.SERVICE_UNAVAILABLE: "service_unavailable",
 }
 
 

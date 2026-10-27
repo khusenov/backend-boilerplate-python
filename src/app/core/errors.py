@@ -9,3 +9,7 @@ class AppError(Exception):
 
 class NotFoundError(AppError):
     status = HTTPStatus.NOT_FOUND
+
+
+class ConflictError(AppError):
+    status = HTTPStatus.CONFLICT

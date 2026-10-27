@@ -1,0 +1,11 @@
+{
+  "bad_request": 400,
+  "content_too_large": 413,
+  "internal_server_error": 500,
+  "method_not_allowed": 405,
+  "not_found": 404,
+  "service_unavailable": 503,
+  "users.email_taken": 409,
+  "users.not_found": 404,
+  "validation_failed": 422
+}

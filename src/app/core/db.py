@@ -1,12 +1,18 @@
+import enum
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+import psycopg
 from pydantic import SecretStr
-from sqlalchemy import URL, DateTime, MetaData, func, make_url
+from sqlalchemy import URL, DateTime, Enum, MetaData, func, make_url
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeEngine
+
+from app.core.errors import AppError
 
 MIGRATION_LOCK_ID = 7_243_015_001
 
@@ -14,6 +20,10 @@ MIGRATION_LOCK_ID = 7_243_015_001
 def psycopg_url(database_url: SecretStr) -> URL:
     raw = database_url.get_secret_value()
     return make_url(raw).set(drivername="postgresql+psycopg")
+
+
+def enum_values(enum_class: type[enum.Enum]) -> list[str]:
+    return [member.value for member in enum_class]
 
 
 class Base(DeclarativeBase):
@@ -27,7 +37,13 @@ class Base(DeclarativeBase):
         }
     )
     type_annotation_map: Mapping[type[Any], TypeEngine[Any]] = {
-        datetime: DateTime(timezone=True)
+        datetime: DateTime(timezone=True),
+        enum.StrEnum: Enum(
+            enum.StrEnum,
+            native_enum=False,
+            values_callable=enum_values,
+            validate_strings=True,
+        ),
     }
     __mapper_args__: Mapping[str, Any] = {"eager_defaults": True}
 
@@ -45,3 +61,14 @@ class Base(DeclarativeBase):
         server_default=func.statement_timestamp(),
         onupdate=func.statement_timestamp(),
     )
+
+
+async def flush(session: AsyncSession, errors: Mapping[str, type[AppError]]) -> None:
+    try:
+        await session.flush()
+    except IntegrityError as error:
+        cause = error.orig
+        name = cause.diag.constraint_name if isinstance(cause, psycopg.Error) else None
+        if name is None or name not in errors:
+            raise
+        raise errors[name]() from error

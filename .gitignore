@@ -8,6 +8,7 @@ __pycache__/
 .env
 
 # local
-docs
+docs/*
+!docs/adr/
 .architecture-work
 .idea
