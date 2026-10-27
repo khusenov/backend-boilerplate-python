@@ -8,7 +8,7 @@ from alembic.script import ScriptDirectory
 from app.core.config import Settings
 from app.core.http.problems import HTTP_ERROR_CODES
 from app.main import create_app
-from tests.architecture.inventory import app_errors
+from tests.architecture.inventory import app_errors, task_names
 from tests.migrations import PYPROJECT
 
 SNAPSHOTS = Path(__file__).parent / "snapshots"
@@ -74,4 +74,15 @@ def test_error_codes_are_append_only(update_snapshots: bool) -> None:
 
     assert document == snapshot.read_text(), (
         "the error codes changed: review the diff, then run make snapshots"
+    )
+
+
+def test_task_names_match_the_snapshot(update_snapshots: bool) -> None:
+    document = json.dumps(task_names(), indent=2) + "\n"
+    snapshot = SNAPSHOTS / "task_names.json"
+    if update_snapshots:
+        snapshot.write_text(document)
+
+    assert document == snapshot.read_text(), (
+        "the task names changed: review the diff, then run make snapshots"
     )

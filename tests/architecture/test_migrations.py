@@ -3,7 +3,9 @@ import io
 from argparse import Namespace
 from collections.abc import Iterator
 from contextlib import redirect_stdout
+from importlib import metadata, resources
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from alembic import command
@@ -29,6 +31,15 @@ from testcontainers.community.postgres import PostgresContainer
 
 from app.core.db import MIGRATION_LOCK_ID, Base
 from tests.migrations import PYPROJECT, alembic_config
+
+
+def revision_modules() -> list[ModuleType]:
+    scripts = ScriptDirectory.from_config(Config(toml_file=PYPROJECT))
+    return [script.module for script in scripts.walk_revisions()]
+
+
+def version_of(name: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in name.split("_")[0].split("."))
 
 
 def current_heads(database_url: str) -> tuple[str, ...]:
@@ -184,6 +195,47 @@ def test_migrations_run_holding_the_lock_with_a_lock_timeout(
         event.remove(Engine, "before_cursor_execute", observe)
 
     assert seen == {(False, "5s")}
+
+
+def test_each_revision_commits_on_its_own(empty_database_url: str) -> None:
+    commits: list[Connection] = []
+
+    def record(connection: Connection) -> None:
+        commits.append(connection)
+
+    event.listen(Engine, "commit", record)
+    try:
+        with alembic_config(empty_database_url) as config:
+            command.upgrade(config, "head")
+    finally:
+        event.remove(Engine, "commit", record)
+
+    assert len(commits) == len(revision_modules()) + 1
+
+
+def test_every_newer_procrastinate_migration_has_a_revision() -> None:
+    modules = revision_modules()
+    [vendored] = [
+        module.procrastinate_version
+        for module in modules
+        if hasattr(module, "procrastinate_version")
+    ]
+    covered = {getattr(module, "procrastinate_migration", None) for module in modules}
+    installed = version_of(metadata.version("procrastinate"))
+    migrations = [
+        path.name
+        for path in resources.files("procrastinate.sql.migrations").iterdir()
+        if path.name.endswith(".sql")
+    ]
+    due = {
+        name
+        for name in migrations
+        if version_of(name) > version_of(vendored)
+        and not (version_of(name) == installed and "_post_" in name)
+    }
+
+    assert migrations
+    assert due - covered == set()
 
 
 def test_env_reads_metadata_through_bootstrap() -> None:

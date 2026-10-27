@@ -7,6 +7,7 @@ dependencies = [
     "argon2-cffi>=25.1.0",
     "fastapi>=0.143.1",
     "limits>=5.8.0",
+    "procrastinate==3.10.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
@@ -76,13 +77,13 @@ ignore = ["TRY003", "TRY004"]
 "os.environb".msg = "Read settings through app.core.config.Settings."
 "os.getenv".msg = "Read settings through app.core.config.Settings."
 "os.getenvb".msg = "Read settings through app.core.config.Settings."
-"fastapi.BackgroundTasks".msg = "Defer a job with app.core.jobs.JobQueue instead."
-"fastapi.background".msg = "Defer a job with app.core.jobs.JobQueue instead."
-"starlette.background".msg = "Defer a job with app.core.jobs.JobQueue instead."
-"asyncio.create_task".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
-"asyncio.tasks.create_task".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
-"asyncio.ensure_future".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
-"asyncio.tasks.ensure_future".msg = "Defer a job with app.core.jobs.JobQueue, or use asyncio.TaskGroup."
+"fastapi.BackgroundTasks".msg = "Defer a job with app.core.jobs.queue.JobQueue instead."
+"fastapi.background".msg = "Defer a job with app.core.jobs.queue.JobQueue instead."
+"starlette.background".msg = "Defer a job with app.core.jobs.queue.JobQueue instead."
+"asyncio.create_task".msg = "Defer a job with app.core.jobs.queue.JobQueue, or use asyncio.TaskGroup."
+"asyncio.tasks.create_task".msg = "Defer a job with app.core.jobs.queue.JobQueue, or use asyncio.TaskGroup."
+"asyncio.ensure_future".msg = "Defer a job with app.core.jobs.queue.JobQueue, or use asyncio.TaskGroup."
+"asyncio.tasks.ensure_future".msg = "Defer a job with app.core.jobs.queue.JobQueue, or use asyncio.TaskGroup."
 "src".msg = "Import app, not src.app."
 "typing.no_type_check".msg = "Silence one line with # pyright: ignore[rule]."
 "typing_extensions.no_type_check".msg = "Silence one line with # pyright: ignore[rule]."
@@ -118,6 +119,18 @@ ignore_imports = [
     "app.modules.*.router -> fastapi",
     "app.modules.*.router -> app.core.http.**",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Procrastinate stays in core.jobs and tasks"
+type = "forbidden"
+source_modules = ["app.core.*", "app.modules"]
+forbidden_modules = ["procrastinate"]
+allow_indirect_imports = true
+ignore_imports = [
+    "app.core.jobs.** -> procrastinate",
+    "app.modules.*.tasks -> procrastinate",
+]
+unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "Modules meet only through public.py"
@@ -161,6 +174,7 @@ asyncio_default_test_loop_scope = "session"
 [tool.coverage.run]
 branch = true
 source = ["app"]
+patch = ["subprocess"]
 
 [tool.coverage.report]
 fail_under = 90

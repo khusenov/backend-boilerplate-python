@@ -1,7 +1,10 @@
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from typing import Any, cast
 
+import psycopg
 import pytest
 import sentry_sdk
 from alembic import command
@@ -20,10 +23,13 @@ from sqlalchemy.ext.asyncio import (
 )
 from testcontainers.community.postgres import PostgresContainer
 
+from app.bootstrap import job_app
 from app.core.config import Settings
+from app.core.jobs.queue import JobQueue
 from app.core.resources import Resources
 from app.main import create_app
 from app.modules.auth import public as auth
+from tests import jobs
 from tests.clients import serve
 from tests.migrations import alembic_config
 from tests.scratch import ScratchBase
@@ -146,6 +152,8 @@ def offline_sentry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     yield
     sentry_sdk.get_client().close()
     sentry_sdk.get_global_scope().set_client(None)
+    sentry_sdk.get_isolation_scope().clear()
+    sentry_sdk.get_current_scope().clear()
 
 
 @pytest.fixture
@@ -156,11 +164,19 @@ def resources(
         yield Resources(
             engine=engine,
             sessionmaker=sessionmaker,
+            jobs=JobQueue(job_app),
             limiter=MovingWindowRateLimiter(MemoryStorage()),
             hashing=hashing,
             hashing_slots=asyncio.Semaphore(4),
             authenticate=auth.authenticate,
         )
+
+
+@pytest.fixture
+async def run_jobs(connection: AsyncConnection, resources: Resources) -> jobs.RunJobs:
+    raw = await connection.get_raw_connection()
+    driver = cast(psycopg.AsyncConnection[Any], raw.driver_connection)
+    return partial(jobs.run_jobs, driver, resources)
 
 
 @pytest.fixture

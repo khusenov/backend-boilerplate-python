@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapper
 from starlette.routing import BaseRoute
 
 import app
+from app import bootstrap
 from app.core.db import Base
 from app.core.errors import AppError
 
@@ -64,6 +65,12 @@ def app_error_classes() -> list[type[AppError]]:
 
 def app_errors() -> list[type[AppError]]:
     return [error for error in app_error_classes() if hasattr(error, "code")]
+
+
+def task_names() -> list[str]:
+    return sorted(
+        name for blueprint in bootstrap.BLUEPRINTS for name in blueprint.tasks
+    )
 
 
 def models_in(

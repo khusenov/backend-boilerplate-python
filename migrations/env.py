@@ -23,9 +23,17 @@ def skips_a_database_ahead() -> bool:
     return context.get_x_argument(as_dictionary=True).get("ahead") == "skip"
 
 
+def include_name(name: str | None, type_: str, _parents: object) -> bool:
+    return type_ != "table" or not str(name).startswith("procrastinate_")
+
+
 def run_migrations(connection: Connection) -> None:
     context.configure(
-        connection=connection, target_metadata=metadata, compare_server_default=True
+        connection=connection,
+        target_metadata=metadata,
+        compare_server_default=True,
+        include_name=include_name,
+        transaction_per_migration=True,
     )
     unknown = unknown_revisions() if skips_a_database_ahead() else []
     if unknown:

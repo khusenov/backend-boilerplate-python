@@ -9,6 +9,10 @@ from pydantic import SecretStr
 from app.core.config import Settings
 
 ENV_VAR = re.compile(r"^ +- key: (\w+)\n +(\w+):", re.MULTILINE)
+GROUP = re.compile(
+    r"^  - name: ([\w-]+)\n    envVars:\n((?:      .*\n)*)", re.MULTILINE
+)
+LINKED_GROUP = re.compile(r"^ +- fromGroup: ([\w-]+)$", re.MULTILINE)
 SERVICE = re.compile(r"^  - type: (\w+)\n((?:    .*\n)*)", re.MULTILINE)
 SERVICE_FIELD = re.compile(r"^    (\w+): (.+)$", re.MULTILINE)
 COMPOSE_MIGRATE = re.compile(
@@ -36,13 +40,31 @@ def services(root: Path) -> list[dict[str, str]]:
     ]
 
 
-def test_staging_sets_every_setting_the_image_does_not(
+def keys_in(body: str) -> set[str]:
+    return {key for key, _ in ENV_VAR.findall(body)}
+
+
+def service_env_vars(root: Path) -> dict[str, set[str]]:
+    blueprint = read_blueprint(root)
+    groups = {name: keys_in(body) for name, body in GROUP.findall(blueprint)}
+    env_vars: dict[str, set[str]] = {}
+    for _, body in SERVICE.findall(blueprint):
+        linked = (groups[group] for group in LINKED_GROUP.findall(body))
+        name = dict(SERVICE_FIELD.findall(body))["name"]
+        env_vars[name] = keys_in(body).union(*linked)
+    return env_vars
+
+
+def test_every_staging_service_gets_every_setting_the_image_does_not(
     pytestconfig: pytest.Config,
 ) -> None:
-    names = {name for name, _ in env_var_sources(pytestconfig.rootpath)}
-    settings = {name.upper() for name in Settings.model_fields}
+    env_vars = service_env_vars(pytestconfig.rootpath)
+    settings = {name.upper() for name in Settings.model_fields} - {"GIT_SHA"}
 
-    assert names - {"PORT"} == settings - {"GIT_SHA"}
+    assert env_vars
+    assert {name: keys - {"PORT"} for name, keys in env_vars.items()} == dict.fromkeys(
+        env_vars, settings
+    )
 
 
 def test_staging_keeps_secrets_out_of_git(pytestconfig: pytest.Config) -> None:
@@ -95,3 +117,27 @@ def test_deploys_migrate_with_the_rollback_safe_command(
 
     assert tuple(json.loads(compose_command)) == MIGRATE_COMMAND
     assert pre_deploy_commands == {MIGRATE_COMMAND}
+
+
+def test_only_the_worker_migrates_before_its_deploy(
+    pytestconfig: pytest.Config,
+) -> None:
+    migrating = [
+        service["type"]
+        for service in services(pytestconfig.rootpath)
+        if "preDeployCommand" in service
+    ]
+
+    assert migrating == ["worker"]
+
+
+def test_the_staging_worker_runs_the_worker_module(
+    pytestconfig: pytest.Config,
+) -> None:
+    commands = [
+        service.get("dockerCommand")
+        for service in services(pytestconfig.rootpath)
+        if service["type"] == "worker"
+    ]
+
+    assert commands == ["python -m app.worker"]

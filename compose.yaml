@@ -35,6 +35,13 @@ services:
       postgres:
         condition: service_healthy
 
+  worker:
+    <<: *app
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   api:
     <<: *app
     ports:

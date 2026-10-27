@@ -21,13 +21,16 @@ class CapturingTransport(Transport):
     def flush(self, timeout: float, callback: Any | None = None) -> None:
         self.flushes += 1
 
-    def events(self) -> list[dict[str, Any]]:
+    def items(self, item_type: str) -> list[dict[str, Any]]:
         return [
             item.payload.json
             for envelope in self.envelopes
             for item in envelope.items
-            if item.type == "event" and item.payload.json is not None
+            if item.type == item_type and item.payload.json is not None
         ]
+
+    def events(self) -> list[dict[str, Any]]:
+        return self.items("event")
 
     def payload(self) -> bytes:
         return b"".join(envelope.serialize() for envelope in self.envelopes)

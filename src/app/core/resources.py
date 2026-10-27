@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from limits.aio.strategies import MovingWindowRateLimiter
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.core.jobs.queue import JobQueue
 from app.core.security import Authenticate
 
 
@@ -12,6 +13,7 @@ from app.core.security import Authenticate
 class Resources:
     engine: AsyncEngine
     sessionmaker: async_sessionmaker[AsyncSession]
+    jobs: JobQueue
     limiter: MovingWindowRateLimiter
     hashing: Executor
     hashing_slots: asyncio.Semaphore

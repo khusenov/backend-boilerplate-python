@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules
@@ -16,19 +17,33 @@ from app.core.audit import AuditEvent
 from app.core.config import Settings
 from app.core.db import Base
 from app.core.errors import AppError
+from app.core.jobs import periodic
+from app.core.jobs import tasks as core_tasks
+from app.core.jobs.queue import Message
+from app.core.jobs.tasks import RETRY
 from app.core.schemas import Schema
 from app.main import create_app
 from tests.architecture.inventory import (
     app_error_classes,
     app_errors,
     app_models,
+    app_subclasses,
+    models_in,
     module_of,
     route_models,
+    task_names,
 )
 
 APP_ROOT = Path(app.__path__[0])
 MODULES_ROOT = Path(app.modules.__path__[0])
-BANNED_CALLS = {"commit", "rollback", "exec_driver_sql", "literal_column"}
+BANNED_CALLS = {
+    "commit",
+    "rollback",
+    "exec_driver_sql",
+    "literal_column",
+    "driver_connection",
+    "get_raw_connection",
+}
 SQL_TABLE = re.compile(r"\b(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+(\w+)", re.IGNORECASE)
 SNAKE_CASE = "[a-z0-9]+(?:_[a-z0-9]+)*"
 ANATOMY = {
@@ -56,6 +71,17 @@ def public_modules() -> list[ModuleType]:
         importlib.import_module(f"app.modules.{name}.public")
         for name in module_names()
         if (MODULES_ROOT / name / "public.py").exists()
+    ]
+
+
+def task_modules() -> list[ModuleType]:
+    return [
+        periodic,
+        *(
+            importlib.import_module(f"app.modules.{name}.tasks")
+            for name in module_names()
+            if (MODULES_ROOT / name / "tasks.py").exists()
+        ),
     ]
 
 
@@ -145,7 +171,15 @@ def is_dto(value: object) -> bool:
     )
 
 
-def code_pattern(module: str | None) -> str:
+def shared_models(value: object) -> Iterator[type[BaseModel]]:
+    if inspect.isfunction(value):
+        for hint in typing.get_type_hints(value).values():
+            yield from models_in(hint)
+    else:
+        yield from models_in(value)
+
+
+def name_pattern(module: str | None) -> str:
     return rf"{module}\.{SNAKE_CASE}" if module else SNAKE_CASE
 
 
@@ -157,6 +191,16 @@ def test_bootstrap_lists_every_module() -> None:
 
     assert module_names()
     assert listed == module_names()
+
+
+def test_bootstrap_registers_every_task_module() -> None:
+    unregistered = [
+        module.__name__
+        for module in task_modules()
+        if module.blueprint not in bootstrap.BLUEPRINTS
+    ]
+
+    assert unregistered == []
 
 
 def test_modules_leave_transactions_and_raw_sql_to_core() -> None:
@@ -172,13 +216,15 @@ def test_modules_leave_transactions_and_raw_sql_to_core() -> None:
     assert found == []
 
 
-def test_modules_leave_audit_events_to_core() -> None:
+def test_modules_leave_core_tables_to_core() -> None:
     paths = sorted(MODULES_ROOT.rglob("*.py"))
     found = [
         f"{path.relative_to(MODULES_ROOT)}:{line}: {name}"
         for path in paths
         for line, name in mentioned_names(path)
-        if name == AuditEvent.__name__ or AuditEvent.__tablename__ in name
+        if name == AuditEvent.__name__
+        or AuditEvent.__tablename__ in name
+        or "procrastinate_" in name
     ]
 
     assert paths
@@ -258,13 +304,13 @@ def test_public_modules_export_session_taking_functions_and_dtos() -> None:
 
 def test_public_dtos_never_serve_routes(settings: Settings) -> None:
     served = set(route_models(create_app(settings).routes))
-    dtos = [
-        getattr(public, name)
+    dtos = {
+        model
         for public in public_modules()
         for name in public.__all__
-        if is_dto(getattr(public, name))
-    ]
-    doubled = [f"{dto.__module__}.{dto.__qualname__}" for dto in dtos if dto in served]
+        for model in shared_models(getattr(public, name))
+    }
+    doubled = sorted(f"{dto.__module__}.{dto.__qualname__}" for dto in dtos & served)
 
     assert served
     assert dtos
@@ -332,7 +378,7 @@ def test_error_codes_carry_their_module_name() -> None:
     misnamed = [
         f"{error.__module__}.{error.__qualname__}: {error.code}"
         for error in errors
-        if not re.fullmatch(code_pattern(module_of(error.__module__)), error.code)
+        if not re.fullmatch(name_pattern(module_of(error.__module__)), error.code)
     ]
 
     assert errors
@@ -369,3 +415,50 @@ def test_error_codes_are_unique() -> None:
 
     assert codes
     assert shared == []
+
+
+def test_task_names_carry_their_module_name() -> None:
+    misnamed = [
+        f"{module.__name__}: {name}"
+        for module in task_modules()
+        for name in module.blueprint.tasks
+        if not re.fullmatch(name_pattern(module_of(module.__name__)), name)
+    ]
+
+    assert misnamed == []
+
+
+def test_module_tasks_retry_with_the_core_strategy() -> None:
+    unretried = [
+        f"{module.__name__}: {name}"
+        for module in task_modules()
+        if module is not periodic
+        for name, declared in module.blueprint.tasks.items()
+        if declared.retry_strategy is not RETRY
+    ]
+
+    assert unretried == []
+
+
+def test_module_tasks_take_validated_messages() -> None:
+    raw = [
+        f"{module.__name__}: {name}"
+        for module in task_modules()
+        if module is not periodic
+        for name, declared in module.blueprint.tasks.items()
+        if declared.func.__module__ != core_tasks.__name__
+    ]
+
+    assert raw == []
+
+
+def test_payloads_name_registered_tasks() -> None:
+    registered = set(task_names())
+    unregistered = [
+        f"{payload.__module__}.{payload.__qualname__}"
+        for payload in app_subclasses(Message)
+        if payload is not Message
+        and getattr(payload, "task_name", None) not in registered
+    ]
+
+    assert unregistered == []
