@@ -1,7 +1,7 @@
 NEXT_REVISION = $(shell printf '%04d' $$(( $$(find migrations -name '[0-9][0-9][0-9][0-9]_*.py' | wc -l) + 1 )))
 SMOKE = docker compose --project-name backend-boilerplate-smoke --file compose.yaml --file compose.smoke.yaml --profile full
 
-.PHONY: check db migrate migration snapshots dev api worker image smoke smoke-run
+.PHONY: check db mailpit migrate migration snapshots dev api worker image smoke smoke-run
 
 check:
 	uv lock --check
@@ -14,6 +14,9 @@ check:
 db:
 	docker compose up --wait postgres
 
+mailpit:
+	docker compose up --wait mailpit
+
 migrate: .env db
 	uv run --env-file .env alembic upgrade head
 
@@ -24,7 +27,7 @@ migration: .env
 snapshots:
 	uv run pytest tests/architecture/test_snapshots.py --update-snapshots
 
-dev: migrate
+dev: mailpit migrate
 	$(MAKE) --no-print-directory -j 2 api worker
 
 api: .env

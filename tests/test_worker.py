@@ -216,13 +216,8 @@ async def test_stopping_workers_give_jobs_30_seconds_then_retry_the_rest(
 
 
 @pytest.mark.committed
-@pytest.mark.usefixtures("connection")
-async def test_the_worker_process_beats_until_sigterm(
-    monkeypatch: pytest.MonkeyPatch, database_url: str
-) -> None:
-    monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
-    monkeypatch.setenv("DATABASE_URL", database_url)
+@pytest.mark.usefixtures("connection", "environment")
+async def test_the_worker_process_beats_until_sigterm() -> None:
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "app.worker", stdout=PIPE, stderr=STDOUT
     )

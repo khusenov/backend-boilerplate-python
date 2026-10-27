@@ -1,4 +1,5 @@
 [
   "heartbeat",
-  "recover_stalled_jobs"
+  "recover_stalled_jobs",
+  "users.send_welcome_email"
 ]

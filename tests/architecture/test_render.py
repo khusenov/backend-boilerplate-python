@@ -23,6 +23,7 @@ MIGRATE_COMMAND = (
     "-c",
     "alembic -x ahead=skip upgrade head && alembic -x ahead=skip check",
 )
+SET_BY_HAND = {"SENTRY_DSN", "SMTP_PASSWORD", "SMTP_USERNAME"}
 
 
 def read_blueprint(root: Path) -> str:
@@ -40,18 +41,18 @@ def services(root: Path) -> list[dict[str, str]]:
     ]
 
 
-def keys_in(body: str) -> set[str]:
-    return {key for key, _ in ENV_VAR.findall(body)}
+def delivered_keys(body: str) -> set[str]:
+    return {key for key, source in ENV_VAR.findall(body) if source != "sync"}
 
 
 def service_env_vars(root: Path) -> dict[str, set[str]]:
     blueprint = read_blueprint(root)
-    groups = {name: keys_in(body) for name, body in GROUP.findall(blueprint)}
+    groups = {name: delivered_keys(body) for name, body in GROUP.findall(blueprint)}
     env_vars: dict[str, set[str]] = {}
     for _, body in SERVICE.findall(blueprint):
         linked = (groups[group] for group in LINKED_GROUP.findall(body))
         name = dict(SERVICE_FIELD.findall(body))["name"]
-        env_vars[name] = keys_in(body).union(*linked)
+        env_vars[name] = delivered_keys(body).union(*linked)
     return env_vars
 
 
@@ -63,8 +64,20 @@ def test_every_staging_service_gets_every_setting_the_image_does_not(
 
     assert env_vars
     assert {name: keys - {"PORT"} for name, keys in env_vars.items()} == dict.fromkeys(
-        env_vars, settings
+        env_vars, settings - SET_BY_HAND
     )
+
+
+def test_render_leaves_only_the_listed_settings_to_be_set_by_hand(
+    pytestconfig: pytest.Config,
+) -> None:
+    by_hand = {
+        key
+        for key, source in env_var_sources(pytestconfig.rootpath)
+        if source == "sync"
+    }
+
+    assert by_hand == SET_BY_HAND
 
 
 def test_staging_keeps_secrets_out_of_git(pytestconfig: pytest.Config) -> None:

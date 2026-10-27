@@ -1,8 +1,9 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 from pydantic import MISSING, StringConstraints
 
+from app.core.jobs.queue import Message
 from app.core.schemas import Email, Schema, Timestamp
 from app.core.security import Role
 
@@ -50,3 +51,9 @@ class UserDTO(Schema):
     email: str
     role: Role
     active: bool
+
+
+class SendWelcomeEmail(Message):
+    task_name: ClassVar[str] = "users.send_welcome_email"
+
+    user_id: uuid.UUID

@@ -63,6 +63,21 @@ def test_malformed_emails_are_rejected(email: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "email",
+    [
+        "attacker,victim@example.com",
+        "victim:attacker@evil.example;",
+        "victim<attacker@evil.example>",
+        "ada(comment)@example.com",
+        '"ada"@example.com',
+    ],
+)
+def test_emails_refuse_what_mail_reads_as_another_address(email: str) -> None:
+    with pytest.raises(ValidationError):
+        Contact(email=email)
+
+
+@pytest.mark.parametrize(
     ("at", "text"),
     [
         (

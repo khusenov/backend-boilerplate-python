@@ -3,12 +3,14 @@ import threading
 from collections.abc import AsyncIterator
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.bootstrap import build_resources, job_app
 from app.core.config import Settings
+from app.core.email import SmtpEmailSender
 from app.core.resources import Resources
 from app.modules.auth import public as auth
 from tests.scratch import ScratchNote
@@ -124,3 +126,28 @@ def test_principals_come_from_auth(built_resources: Resources) -> None:
 
 def test_jobs_share_the_process_job_app(built_resources: Resources) -> None:
     assert built_resources.jobs.app is job_app
+
+
+async def test_email_uses_every_smtp_setting_and_a_ten_second_timeout(
+    settings: Settings,
+) -> None:
+    smtp = {
+        "smtp_host": "smtp.example.com",
+        "smtp_port": 2525,
+        "smtp_username": SecretStr("staging"),
+        "smtp_password": SecretStr("smtp-password"),
+        "smtp_tls": False,
+        "email_from": "staging@example.com",
+    }
+    resources = build_resources(settings.model_copy(update=smtp))
+    await resources.close()
+
+    assert resources.email == SmtpEmailSender(
+        host="smtp.example.com",
+        port=2525,
+        username=SecretStr("staging"),
+        password=SecretStr("smtp-password"),
+        tls=False,
+        from_address="staging@example.com",
+        timeout=10,
+    )
