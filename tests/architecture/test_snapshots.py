@@ -8,7 +8,7 @@ from alembic.script import ScriptDirectory
 from app.core.config import Settings
 from app.core.http.problems import HTTP_ERROR_CODES
 from app.main import create_app
-from tests.architecture.inventory import app_errors, task_names
+from tests.architecture.inventory import app_errors, app_messages, task_names
 from tests.migrations import PYPROJECT
 
 SNAPSHOTS = Path(__file__).parent / "snapshots"
@@ -85,4 +85,29 @@ def test_task_names_match_the_snapshot(update_snapshots: bool) -> None:
 
     assert document == snapshot.read_text(), (
         "the task names changed: review the diff, then run make snapshots"
+    )
+
+
+def test_messages_only_gain_optional_fields(update_snapshots: bool) -> None:
+    schemas = {
+        name: message.model_json_schema() for name, message in app_messages().items()
+    }
+    snapshot = SNAPSHOTS / "messages.json"
+    published = json.loads(snapshot.read_text()) if snapshot.exists() else {}
+    newly_required = [
+        f"{name}: {field}"
+        for name, recorded in published.items()
+        if name in schemas
+        for field in schemas[name].get("required", [])
+        if field not in recorded.get("required", [])
+    ]
+    assert newly_required == [], (
+        "payloads and events only gain optional fields: give these a default"
+    )
+    document = json.dumps(schemas, indent=2, sort_keys=True) + "\n"
+    if update_snapshots:
+        snapshot.write_text(document)
+
+    assert document == snapshot.read_text(), (
+        "the message shapes changed: review the diff, then run make snapshots"
     )

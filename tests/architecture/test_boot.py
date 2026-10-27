@@ -15,22 +15,30 @@ def served_paths(settings: Settings) -> set[str | None]:
     return {context.path for context in iter_route_contexts(app.routes) if context.path}
 
 
+@pytest.fixture
+def production_environment(monkeypatch: pytest.MonkeyPatch, environment: None) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SECRET_KEY", "x" * 32)
+    monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    monkeypatch.setenv("SENTRY_DSN", FAKE_DSN)
+    monkeypatch.setenv("SENTRY_ENVIRONMENT", "production")
+
+
 def test_app_boots(settings: Settings) -> None:
     schema = create_app(settings).openapi()
 
     assert schema["info"]["title"] == "backend-boilerplate"
 
 
-def test_short_production_key_fails_boot(
-    monkeypatch: pytest.MonkeyPatch, database_url: str
-) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
+@pytest.mark.usefixtures("production_environment")
+def test_production_boots_with_smtp_tls_on_by_default() -> None:
+    assert create_app().title == "backend-boilerplate"
+
+
+@pytest.mark.usefixtures("production_environment")
+def test_short_production_key_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "x" * 31)
-    monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
-    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
-    monkeypatch.setenv("SENTRY_DSN", FAKE_DSN)
-    monkeypatch.setenv("SENTRY_ENVIRONMENT", "production")
 
     with pytest.raises(ValidationError) as caught:
         create_app()
@@ -43,6 +51,18 @@ def test_short_production_key_fails_boot(
     assert "input_value" not in message
 
 
+@pytest.mark.usefixtures("production_environment")
+def test_plaintext_smtp_fails_production_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SMTP_TLS", "off")
+
+    with pytest.raises(ValidationError) as caught:
+        create_app()
+
+    assert (
+        "unsafe production settings: SMTP_TLS must be on [type=value_error]"
+    ) in str(caught.value)
+
+
 def test_malformed_sentry_dsn_fails_boot(production_settings: Settings) -> None:
     update = {"sentry_dsn": SecretStr("public@sentry.invalid/1")}
 
@@ -50,41 +70,33 @@ def test_malformed_sentry_dsn_fails_boot(production_settings: Settings) -> None:
         create_app(production_settings.model_copy(update=update))
 
 
-def test_empty_secret_key_fails_boot(
-    monkeypatch: pytest.MonkeyPatch, database_url: str
-) -> None:
-    monkeypatch.setenv("APP_ENV", "local")
+@pytest.mark.usefixtures("environment")
+def test_empty_secret_key_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "")
-    monkeypatch.setenv("DATABASE_URL", database_url)
 
     with pytest.raises(ValidationError, match="Field required"):
         create_app()
 
 
-def test_missing_app_env_fails_boot(
-    monkeypatch: pytest.MonkeyPatch, database_url: str
-) -> None:
-    monkeypatch.setenv("SECRET_KEY", "x" * 32)
-    monkeypatch.setenv("DATABASE_URL", database_url)
+@pytest.mark.usefixtures("environment")
+def test_missing_app_env_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_ENV")
 
     with pytest.raises(ValidationError, match="Field required"):
         create_app()
 
 
+@pytest.mark.usefixtures("environment")
 def test_missing_database_url_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_ENV", "local")
-    monkeypatch.setenv("SECRET_KEY", "x" * 32)
+    monkeypatch.delenv("DATABASE_URL")
 
     with pytest.raises(ValidationError, match="Field required"):
         create_app()
 
 
-def test_unknown_app_env_fails_boot(
-    monkeypatch: pytest.MonkeyPatch, database_url: str
-) -> None:
+@pytest.mark.usefixtures("environment")
+def test_unknown_app_env_fails_boot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "staging")
-    monkeypatch.setenv("SECRET_KEY", "x" * 32)
-    monkeypatch.setenv("DATABASE_URL", database_url)
 
     with pytest.raises(
         ValidationError, match="Input should be 'local', 'test' or 'production'"

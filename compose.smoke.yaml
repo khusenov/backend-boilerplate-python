@@ -1,6 +1,8 @@
 services:
   postgres:
     ports: !reset []
+  mailpit:
+    ports: !reset []
   api:
     ports: !override
       - "127.0.0.1::8000"

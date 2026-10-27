@@ -1,13 +1,15 @@
 import re
 from typing import Annotated, Literal, Self
 
-from pydantic import NonNegativeInt, SecretStr, field_validator, model_validator
+from pydantic import Field, NonNegativeInt, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     NoDecode,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+from app.core.schemas import Email
 
 ORIGIN_PATTERN = re.compile(r"https?://[a-z0-9.-]+(:[0-9]+)?")
 
@@ -24,6 +26,12 @@ class Settings(BaseSettings):
     trusted_proxy_hops: NonNegativeInt = 0
     sentry_dsn: SecretStr | None = None
     sentry_environment: str | None = None
+    smtp_host: str
+    smtp_port: Annotated[int, Field(ge=1, le=65535)] = 587
+    smtp_username: SecretStr | None = None
+    smtp_password: SecretStr | None = None
+    smtp_tls: bool = True
+    email_from: Email
     git_sha: str = "unknown"
 
     @classmethod
@@ -56,6 +64,12 @@ class Settings(BaseSettings):
         return origins
 
     @model_validator(mode="after")
+    def check_smtp_credentials(self) -> Self:
+        if (self.smtp_username is None) != (self.smtp_password is None):
+            raise ValueError("SMTP_USERNAME and SMTP_PASSWORD must be set together")
+        return self
+
+    @model_validator(mode="after")
     def check_production(self) -> Self:
         if self.app_env != "production":
             return self
@@ -68,6 +82,8 @@ class Settings(BaseSettings):
             problems.append("SENTRY_ENVIRONMENT is required")
         if self.trusted_proxy_hops == 0:
             problems.append("TRUSTED_PROXY_HOPS must be above 0")
+        if not self.smtp_tls:
+            problems.append("SMTP_TLS must be on")
         if not self.cors_origins or not all(
             origin.startswith("https://") for origin in self.cors_origins
         ):

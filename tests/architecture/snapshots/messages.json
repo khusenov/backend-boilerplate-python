@@ -1,0 +1,16 @@
+{
+  "users.send_welcome_email": {
+    "properties": {
+      "user_id": {
+        "format": "uuid",
+        "title": "User Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "user_id"
+    ],
+    "title": "SendWelcomeEmail",
+    "type": "object"
+  }
+}

@@ -7,17 +7,26 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import StatementError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bootstrap import job_app
+from app.core.jobs.queue import JobQueue
 from app.core.pagination import PageQuery
 from app.core.security import Principal, Role
 from app.modules.users import service
 from app.modules.users.errors import EmailTakenError, UserNotFoundError
 from app.modules.users.models import User, UserStatus
-from app.modules.users.schemas import ProfileUpdate, UserCreate, UserUpdate
+from app.modules.users.schemas import (
+    ProfileUpdate,
+    SendWelcomeEmail,
+    UserCreate,
+    UserUpdate,
+)
 from tests.audit import audit_rows
 from tests.factories import make_user, principal_for
+from tests.jobs import job_ids, job_row
 from tests.statements import first_words, record_statements
 
 ADMIN = Principal(user_id=uuid.uuid7(), session_id=uuid.uuid7(), role=Role.ADMIN)
+JOBS = JobQueue(job_app)
 
 type Write = Callable[[AsyncSession, User], Awaitable[User]]
 
@@ -43,7 +52,7 @@ async def test_new_users_are_active_members_with_a_normalized_email(
 ) -> None:
     data = UserCreate(email=" Ada@Example.com ", name=" Ada Lovelace ")
 
-    user = await service.create_user(session, data)
+    user = await service.create_user(session, JOBS, data)
 
     assert (user.email, user.name, user.role, user.status) == (
         "ada@example.com",
@@ -54,12 +63,22 @@ async def test_new_users_are_active_members_with_a_normalized_email(
     assert user.id.version == 7
 
 
+async def test_new_users_get_a_welcome_email_job(session: AsyncSession) -> None:
+    data = UserCreate(email="ada@example.com", name="Ada Lovelace")
+
+    user = await service.create_user(session, JOBS, data)
+
+    (job_id,) = await job_ids(session, SendWelcomeEmail.task_name)
+    row = await job_row(session, job_id)
+    assert (row.status, row.args) == ("todo", {"user_id": str(user.id)})
+
+
 async def test_a_duplicate_email_is_taken(session: AsyncSession) -> None:
     await make_user(session, email="ada@example.com")
     data = UserCreate(email="ADA@example.com", name="Ada Lovelace")
 
     with pytest.raises(EmailTakenError):
-        await service.create_user(session, data)
+        await service.create_user(session, JOBS, data)
 
 
 async def test_a_missing_user_is_not_found(session: AsyncSession) -> None:
@@ -199,7 +218,7 @@ async def test_deactivation_frees_the_email(session: AsyncSession) -> None:
     await service.deactivate_user(session, ADMIN, None, user.id)
     data = UserCreate(email="ada@example.com", name="Ada Lovelace")
 
-    await service.create_user(session, data)
+    await service.create_user(session, JOBS, data)
 
 
 async def test_no_account_can_claim_a_tombstone(session: AsyncSession) -> None:

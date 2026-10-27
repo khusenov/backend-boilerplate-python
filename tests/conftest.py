@@ -31,7 +31,9 @@ from app.main import create_app
 from app.modules.auth import public as auth
 from tests import jobs
 from tests.clients import serve
+from tests.environment import set_test_environment
 from tests.migrations import alembic_config
+from tests.outbox import Outbox
 from tests.scratch import ScratchBase
 from tests.sentry import FAKE_DSN, CapturingTransport
 
@@ -123,6 +125,11 @@ def hermetic_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def environment(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
+    set_test_environment(monkeypatch, database_url)
+
+
+@pytest.fixture
 def settings(database_url: str) -> Settings:
     return Settings(
         app_env="test",
@@ -130,6 +137,8 @@ def settings(database_url: str) -> Settings:
         database_url=SecretStr(database_url),
         cors_origins=("https://app.example.com",),
         trusted_proxy_hops=1,
+        smtp_host="smtp.invalid",
+        email_from="noreply@example.com",
     )
 
 
@@ -143,6 +152,8 @@ def production_settings(database_url: str) -> Settings:
         trusted_proxy_hops=1,
         sentry_dsn=SecretStr(FAKE_DSN),
         sentry_environment="production",
+        smtp_host="smtp.invalid",
+        email_from="noreply@example.com",
     )
 
 
@@ -157,14 +168,20 @@ def offline_sentry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture
+def outbox() -> Outbox:
+    return Outbox()
+
+
+@pytest.fixture
 def resources(
-    engine: AsyncEngine, sessionmaker: async_sessionmaker[AsyncSession]
+    engine: AsyncEngine, sessionmaker: async_sessionmaker[AsyncSession], outbox: Outbox
 ) -> Iterator[Resources]:
     with ThreadPoolExecutor(4) as hashing:
         yield Resources(
             engine=engine,
             sessionmaker=sessionmaker,
             jobs=JobQueue(job_app),
+            email=outbox,
             limiter=MovingWindowRateLimiter(MemoryStorage()),
             hashing=hashing,
             hashing_slots=asyncio.Semaphore(4),

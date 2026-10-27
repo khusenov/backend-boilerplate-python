@@ -15,6 +15,7 @@ import app
 from app import bootstrap
 from app.core.db import Base
 from app.core.errors import AppError
+from app.core.jobs.queue import Message
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,14 @@ def task_names() -> list[str]:
     return sorted(
         name for blueprint in bootstrap.BLUEPRINTS for name in blueprint.tasks
     )
+
+
+def app_messages() -> dict[str, type[Message]]:
+    return {
+        message.task_name: message
+        for message in app_subclasses(Message)
+        if hasattr(message, "task_name")
+    }
 
 
 def models_in(

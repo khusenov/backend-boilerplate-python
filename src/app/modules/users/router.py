@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response
 
 from app.core.http.authorization import require
-from app.core.http.deps import ClientIp, CurrentPrincipal, DbSession
+from app.core.http.deps import ClientIp, CurrentPrincipal, DbSession, Jobs
 from app.core.pagination import PageQuery
 from app.core.security import Permission
 from app.modules.users import service
@@ -30,8 +30,8 @@ async def list_users(
 
 
 @router.post("", status_code=201, dependencies=[require(Permission.USERS_WRITE)])
-async def create_user(body: UserCreate, session: DbSession) -> UserRead:
-    user = await service.create_user(session, body)
+async def create_user(body: UserCreate, session: DbSession, jobs: Jobs) -> UserRead:
+    user = await service.create_user(session, jobs, body)
     return UserRead.model_validate(user)
 
 

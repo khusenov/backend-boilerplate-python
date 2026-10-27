@@ -130,7 +130,6 @@ ignore_imports = [
     "app.core.jobs.** -> procrastinate",
     "app.modules.*.tasks -> procrastinate",
 ]
-unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]
 name = "Modules meet only through public.py"

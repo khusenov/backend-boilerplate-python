@@ -7,11 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import audit
 from app.core.db import flush
+from app.core.jobs.queue import JobQueue
 from app.core.pagination import Page, PageQuery, decode_cursor, encode_cursor
 from app.core.security import Permission, Principal, Role
 from app.modules.users.errors import EmailTakenError, UserNotFoundError
 from app.modules.users.models import User, UserStatus
-from app.modules.users.schemas import ProfileUpdate, UserCreate, UserUpdate
+from app.modules.users.schemas import (
+    ProfileUpdate,
+    SendWelcomeEmail,
+    UserCreate,
+    UserUpdate,
+)
 
 
 def visible_users(principal: Principal) -> Select[User]:
@@ -21,10 +27,11 @@ def visible_users(principal: Principal) -> Select[User]:
     return statement.where(User.id == principal.user_id)
 
 
-async def create_user(session: AsyncSession, data: UserCreate) -> User:
+async def create_user(session: AsyncSession, jobs: JobQueue, data: UserCreate) -> User:
     user = User(email=data.email, name=data.name)
     session.add(user)
     await flush(session, {"uq_users_email": EmailTakenError})
+    await jobs.defer(session, SendWelcomeEmail(user_id=user.id))
     return user
 
 

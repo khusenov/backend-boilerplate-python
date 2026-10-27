@@ -21,12 +21,7 @@ ADMIN_PASSWORD = "a long admin password"
 TYPED = f"{ADMIN_PASSWORD}\n" * 2
 PROMPTS = "Password: \nRepeat for confirmation: \n"
 
-
-@pytest.fixture(autouse=True)
-def environment(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
-    monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
-    monkeypatch.setenv("DATABASE_URL", database_url)
+pytestmark = pytest.mark.usefixtures("environment")
 
 
 async def create_admin(*args: str, typed: str = TYPED) -> Result:

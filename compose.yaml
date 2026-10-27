@@ -9,6 +9,8 @@ x-app: &app
     TRUSTED_PROXY_HOPS: "1"
     SENTRY_DSN: https://public@sentry.invalid/1
     SENTRY_ENVIRONMENT: compose
+    SMTP_HOST: smtp.invalid
+    EMAIL_FROM: noreply@example.com
   stop_grace_period: 45s
 
 services:
@@ -27,6 +29,12 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
 
   migrate:
     <<: *app

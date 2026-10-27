@@ -100,6 +100,15 @@ def called_names(path: Path) -> Iterator[tuple[int, str]]:
                 yield node.lineno, originals.get(name, name)
 
 
+def email_sends(path: Path) -> Iterator[int]:
+    for node in ast.walk(ast.parse(path.read_text())):
+        match node:
+            case ast.Call(
+                func=ast.Attribute(attr="send", value=ast.Attribute(attr="email"))
+            ):
+                yield node.lineno
+
+
 def mentioned_names(path: Path) -> Iterator[tuple[int, str]]:
     for node in ast.walk(ast.parse(path.read_text())):
         match node:
@@ -259,6 +268,20 @@ def test_upserts_stamp_updated_at() -> None:
 
     assert found
     assert stale == []
+
+
+def test_only_tasks_send_email() -> None:
+    tasks = {Path(inspect.getfile(module)) for module in task_modules()}
+    paths = sorted(APP_ROOT.rglob("*.py"))
+    found = [
+        f"{path.relative_to(APP_ROOT)}:{line}: email.send()"
+        for path in paths
+        if path not in tasks
+        for line in email_sends(path)
+    ]
+
+    assert paths
+    assert found == []
 
 
 def test_public_modules_hide_internals() -> None:

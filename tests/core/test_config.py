@@ -24,6 +24,7 @@ def test_production_accepts_safe_settings(production_settings: Settings) -> None
         ({"sentry_dsn": None}, "SENTRY_DSN is required"),
         ({"sentry_environment": None}, "SENTRY_ENVIRONMENT is required"),
         ({"trusted_proxy_hops": 0}, "TRUSTED_PROXY_HOPS must be above 0"),
+        ({"smtp_tls": False}, "SMTP_TLS must be on"),
         ({"cors_origins": ()}, EXPLICIT_ORIGINS),
         ({"cors_origins": ("*",)}, EXPLICIT_ORIGINS),
         ({"cors_origins": ("https://app.example.com", "*")}, EXPLICIT_ORIGINS),
@@ -50,6 +51,7 @@ def test_production_lists_every_problem_at_once(
         "sentry_dsn": None,
         "sentry_environment": None,
         "trusted_proxy_hops": 0,
+        "smtp_tls": False,
         "cors_origins": (),
     }
     values = production_settings.model_dump() | changes
@@ -62,28 +64,20 @@ def test_production_lists_every_problem_at_once(
         "Value error, unsafe production settings: "
         "SECRET_KEY must be at least 32 characters; "
         "SENTRY_DSN is required; SENTRY_ENVIRONMENT is required; "
-        f"TRUSTED_PROXY_HOPS must be above 0; {EXPLICIT_ORIGINS}"
+        "TRUSTED_PROXY_HOPS must be above 0; SMTP_TLS must be on; "
+        f"{EXPLICIT_ORIGINS}"
     )
 
 
-def test_unset_proxy_and_cors_settings_trust_nothing(
-    monkeypatch: pytest.MonkeyPatch, database_url: str
-) -> None:
-    monkeypatch.setenv("APP_ENV", "local")
-    monkeypatch.setenv("SECRET_KEY", "local-secret-key")
-    monkeypatch.setenv("DATABASE_URL", database_url)
-
+@pytest.mark.usefixtures("environment")
+def test_unset_proxy_and_cors_settings_trust_nothing() -> None:
     settings = Settings.model_validate({})
 
     assert (settings.cors_origins, settings.trusted_proxy_hops) == ((), 0)
 
 
-def test_unset_sentry_settings_report_nothing(
-    monkeypatch: pytest.MonkeyPatch, database_url: str
-) -> None:
-    monkeypatch.setenv("APP_ENV", "local")
-    monkeypatch.setenv("SECRET_KEY", "local-secret-key")
-    monkeypatch.setenv("DATABASE_URL", database_url)
+@pytest.mark.usefixtures("environment")
+def test_unset_sentry_settings_report_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SENTRY_DSN", "")
 
     settings = Settings.model_validate({})
@@ -95,6 +89,70 @@ def test_unset_sentry_settings_report_nothing(
     )
 
 
+@pytest.mark.usefixtures("environment")
+def test_unset_smtp_settings_mean_starttls_on_the_submission_port() -> None:
+    settings = Settings.model_validate({})
+
+    assert (
+        settings.smtp_port,
+        settings.smtp_tls,
+        settings.smtp_username,
+        settings.smtp_password,
+    ) == (587, True, None, None)
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [{"smtp_username": "staging"}, {"smtp_password": "smtp-password"}],
+)
+def test_smtp_credentials_come_in_pairs(
+    settings: Settings, credentials: dict[str, object]
+) -> None:
+    values = settings.model_dump() | credentials
+
+    with pytest.raises(ValidationError) as caught:
+        Settings.model_validate(values)
+
+    (error,) = caught.value.errors()
+    assert error["msg"] == (
+        "Value error, SMTP_USERNAME and SMTP_PASSWORD must be set together"
+    )
+
+
+def test_smtp_credentials_may_be_set_together(settings: Settings) -> None:
+    credentials = {"smtp_username": "staging", "smtp_password": "smtp-password"}
+    values = settings.model_dump() | credentials
+
+    validated = Settings.model_validate(values)
+
+    assert (validated.smtp_username, validated.smtp_password) == (
+        SecretStr("staging"),
+        SecretStr("smtp-password"),
+    )
+
+
+@pytest.mark.parametrize("port", [0, 65536])
+def test_smtp_port_must_be_a_tcp_port(settings: Settings, port: int) -> None:
+    values = settings.model_dump() | {"smtp_port": port}
+
+    with pytest.raises(ValidationError) as caught:
+        Settings.model_validate(values)
+
+    (error,) = caught.value.errors()
+    assert error["loc"] == ("smtp_port",)
+
+
+@pytest.mark.parametrize("address", ["Backend <noreply@example.com>", "noreply"])
+def test_email_from_must_be_a_plain_address(settings: Settings, address: str) -> None:
+    values = settings.model_dump() | {"email_from": address}
+
+    with pytest.raises(ValidationError) as caught:
+        Settings.model_validate(values)
+
+    (error,) = caught.value.errors()
+    assert error["loc"] == ("email_from",)
+
+
 def test_trusted_proxy_hops_cannot_be_negative(settings: Settings) -> None:
     values = settings.model_dump() | {"trusted_proxy_hops": -1}
 
@@ -102,12 +160,10 @@ def test_trusted_proxy_hops_cannot_be_negative(settings: Settings) -> None:
         Settings.model_validate(values)
 
 
+@pytest.mark.usefixtures("environment")
 def test_cors_origins_are_read_as_a_comma_separated_list(
-    monkeypatch: pytest.MonkeyPatch, database_url: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("APP_ENV", "local")
-    monkeypatch.setenv("SECRET_KEY", "local-secret-key")
-    monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv(
         "CORS_ORIGINS", " https://app.example.com,,http://localhost:3000, "
     )
