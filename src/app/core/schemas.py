@@ -11,7 +11,7 @@ from pydantic import (
 )
 from pydantic.config import JsonDict
 
-ADDRESS_CHARACTER = r'[^@\s\x00-\x1f\x7f()<>\[\]:;,"\\]'
+ADDRESS_CHARACTER = r"[!#-'*+\-./0-9=?A-Z^-~]"
 
 Email = Annotated[
     str,
@@ -20,6 +20,16 @@ Email = Annotated[
         to_lower=True,
         max_length=254,
         pattern=rf"^{ADDRESS_CHARACTER}+@{ADDRESS_CHARACTER}+\.{ADDRESS_CHARACTER}+$",
+    ),
+]
+
+Name = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[^\x00-\x1f\x7f]+$",
     ),
 ]
 

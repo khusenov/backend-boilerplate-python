@@ -15,7 +15,9 @@ from app.modules.users import service
 from app.modules.users.errors import EmailTakenError, UserNotFoundError
 from app.modules.users.models import User, UserStatus
 from app.modules.users.schemas import (
+    EmailUpdate,
     ProfileUpdate,
+    SendEmailChangedNotice,
     SendWelcomeEmail,
     UserCreate,
     UserUpdate,
@@ -27,6 +29,7 @@ from tests.statements import first_words, record_statements
 
 ADMIN = Principal(user_id=uuid.uuid7(), session_id=uuid.uuid7(), role=Role.ADMIN)
 JOBS = JobQueue(job_app)
+CHANGE = EmailUpdate(email="lovelace@example.com")
 
 type Write = Callable[[AsyncSession, User], Awaitable[User]]
 
@@ -199,6 +202,73 @@ async def test_writes_lock_the_row_before_changing_it(
     lock, *changes = statements
     assert lock.endswith(" FOR UPDATE")
     assert sorted(map(first_words, changes)) == writes
+
+
+async def test_email_changes_lock_the_row_and_tell_the_old_address(
+    session: AsyncSession,
+) -> None:
+    user = await make_user(session, email="ada@example.com")
+    statements = await record_statements(session)
+
+    await service.change_email(
+        session, JOBS, principal_for(user), "203.0.113.7", CHANGE
+    )
+
+    lock = statements[0]
+    (job_id,) = await job_ids(session, SendEmailChangedNotice.task_name)
+    row = await job_row(session, job_id)
+    assert lock.endswith(" FOR UPDATE")
+    assert user.email == "lovelace@example.com"
+    assert row.args == {"old_email": "ada@example.com"}
+    assert await audit_rows(session) == [
+        (
+            user.id,
+            "users.email_changed",
+            user.id,
+            "203.0.113.7",
+            None,
+            {"email": "lovelace@example.com"},
+        )
+    ]
+
+
+async def test_an_email_change_to_a_taken_address_is_refused(
+    session: AsyncSession,
+) -> None:
+    await make_user(session, email="lovelace@example.com")
+    user = await make_user(session, email="ada@example.com")
+
+    with pytest.raises(EmailTakenError):
+        await service.change_email(session, JOBS, principal_for(user), None, CHANGE)
+
+
+async def test_audit_rows_keep_a_changed_address_after_deactivation(
+    session: AsyncSession,
+) -> None:
+    user = await make_user(session, email="ada@example.com")
+    await service.change_email(session, JOBS, principal_for(user), None, CHANGE)
+
+    await deactivate(session, user)
+
+    assert user.email == f"{user.id}@deactivated"
+    assert await audit_rows(session) == [
+        (
+            user.id,
+            "users.email_changed",
+            user.id,
+            None,
+            None,
+            {"email": "lovelace@example.com"},
+        ),
+        (
+            ADMIN.user_id,
+            "users.deactivated",
+            user.id,
+            None,
+            None,
+            {"status": "deactivated"},
+        ),
+    ]
 
 
 async def test_locking_reads_refresh_the_row(session: AsyncSession) -> None:

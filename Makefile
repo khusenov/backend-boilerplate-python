@@ -48,6 +48,9 @@ smoke: image
 smoke-run:
 	$(SMOKE) up --wait
 	curl --fail --silent --show-error --output /dev/null --write-out '%{http_code}\n' "http://$$($(SMOKE) port api 8000)/health/ready" | grep -x 200
+	curl --silent --show-error --output /dev/null --write-out '%{http_code}\n' --header 'content-type: application/json' \
+		--data '{"email": "ada@example.com", "code": "000000", "name": "Ada", "password": "correcthorsebatterystaple"}' \
+		"http://$$($(SMOKE) port api 8000)/v1/auth/signup/confirm" | grep -x 422
 	i=0; until $(SMOKE) exec -T postgres psql --username=app --tuples-only --no-align \
 		--command="SELECT 1 FROM procrastinate_jobs WHERE task_name = 'heartbeat' AND status = 'succeeded'" | grep -qx 1; do \
 		i=$$((i + 1)); [ $$i -lt 30 ] || { echo 'no heartbeat' >&2; exit 1; }; sleep 1; \

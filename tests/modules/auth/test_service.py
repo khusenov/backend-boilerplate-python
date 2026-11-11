@@ -1,8 +1,11 @@
+import re
 import time
+from collections.abc import Awaitable, Callable
 
 import pytest
 from limits.aio.storage import MemoryStorage
 from limits.aio.strategies import MovingWindowRateLimiter
+from pydantic import SecretStr
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,10 +14,17 @@ from app.modules.auth.errors import TooManyAttemptsError
 from app.modules.auth.models import Credential
 from app.modules.auth.schemas import PasswordSet
 from app.modules.auth.service import (
+    CODE_REQUESTS_PER_ADDRESS,
+    CODE_REQUESTS_PER_EMAIL,
+    GUESSES_PER_ADDRESS,
+    GUESSES_PER_EMAIL,
     LOGINS_PER_ADDRESS,
     LOGINS_PER_EMAIL,
     PASSWORD_HASHER,
+    count_code_request,
+    count_guess,
     count_login_attempt,
+    derive_code,
     dummy_hash,
     find_credential,
     network_key,
@@ -26,6 +36,8 @@ from tests.statements import first_words, record_statements
 
 EMAIL = "ada@example.com"
 
+type Counter = Callable[[MovingWindowRateLimiter, str | None, str], Awaitable[None]]
+
 
 @pytest.fixture
 def limiter() -> MovingWindowRateLimiter:
@@ -33,10 +45,13 @@ def limiter() -> MovingWindowRateLimiter:
 
 
 async def attempt(
-    limiter: MovingWindowRateLimiter, address: str, email: str = EMAIL
+    limiter: MovingWindowRateLimiter,
+    address: str,
+    email: str = EMAIL,
+    counter: Counter = count_login_attempt,
 ) -> bool:
     try:
-        await count_login_attempt(limiter, address, email)
+        await counter(limiter, address, email)
     except TooManyAttemptsError:
         return False
     return True
@@ -119,6 +134,87 @@ async def test_login_budgets_refill_an_hour_after_each_attempt(
     assert (per_address.remaining, per_email.remaining) == (4, 99)
     assert per_address.reset_time - started == pytest.approx(3600, abs=1)
     assert per_email.reset_time - started == pytest.approx(3600, abs=1)
+
+
+async def test_an_address_gets_ten_code_requests_an_hour(
+    limiter: MovingWindowRateLimiter,
+) -> None:
+    emails = [f"user{n}@example.com" for n in range(11)]
+    replies = [
+        await attempt(limiter, "203.0.113.7", email, count_code_request)
+        for email in emails
+    ]
+    other_address = await attempt(
+        limiter, "198.51.100.1", emails[0], count_code_request
+    )
+
+    assert replies == [True] * 10 + [False]
+    assert other_address
+
+
+async def test_an_email_gets_five_code_requests_an_hour(
+    limiter: MovingWindowRateLimiter,
+) -> None:
+    addresses = [f"198.51.100.{n}" for n in range(6)]
+    replies = [
+        await attempt(limiter, address, EMAIL, count_code_request)
+        for address in addresses
+    ]
+
+    assert replies == [True] * 5 + [False]
+
+
+async def test_an_address_gets_twenty_guesses_an_hour(
+    limiter: MovingWindowRateLimiter,
+) -> None:
+    emails = [f"user{n // 5}@example.com" for n in range(21)]
+    replies = [
+        await attempt(limiter, "203.0.113.7", email, count_guess) for email in emails
+    ]
+
+    assert replies == [True] * 20 + [False]
+
+
+async def test_an_email_gets_five_guesses_a_quarter_hour(
+    limiter: MovingWindowRateLimiter,
+) -> None:
+    addresses = [f"198.51.100.{n}" for n in range(6)]
+    replies = [
+        await attempt(limiter, address, EMAIL, count_guess) for address in addresses
+    ]
+
+    assert replies == [True] * 5 + [False]
+
+
+async def test_code_request_and_guess_budgets_refill_after_their_windows(
+    limiter: MovingWindowRateLimiter,
+) -> None:
+    started = time.time()
+    await count_code_request(limiter, "203.0.113.7", EMAIL)
+    await count_guess(limiter, "203.0.113.7", EMAIL)
+
+    windows = [
+        await limiter.get_window_stats(
+            CODE_REQUESTS_PER_ADDRESS, "code_request", "203.0.113.7"
+        ),
+        await limiter.get_window_stats(CODE_REQUESTS_PER_EMAIL, "code_request", EMAIL),
+        await limiter.get_window_stats(GUESSES_PER_ADDRESS, "guess", "203.0.113.7"),
+        await limiter.get_window_stats(GUESSES_PER_EMAIL, "guess", EMAIL),
+    ]
+
+    assert [window.remaining for window in windows] == [9, 4, 19, 4]
+    assert [window.reset_time - started for window in windows] == pytest.approx(
+        [3600, 3600, 3600, 900], abs=1
+    )
+
+
+def test_codes_keep_six_digits_and_their_leading_zeros() -> None:
+    key = SecretStr("test-secret-key")
+
+    codes = [derive_code(key, bytes([n])) for n in range(200)]
+
+    assert all(re.fullmatch(r"[0-9]{6}", code) for code in codes)
+    assert any(code.startswith("0") for code in codes)
 
 
 def test_only_the_right_password_matches() -> None:

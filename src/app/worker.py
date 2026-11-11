@@ -28,7 +28,7 @@ async def work(settings: Settings) -> None:
                     concurrency=CONCURRENCY,
                     shutdown_graceful_timeout=SHUTDOWN_GRACE_SECONDS,
                     stalled_worker_timeout=STALLED_AFTER_SECONDS,
-                    additional_context={"resources": resources},
+                    additional_context={"settings": settings, "resources": resources},
                     worker_middleware=[observe_job],
                 )
     finally:

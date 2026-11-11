@@ -1,5 +1,7 @@
 [
+  "auth.send_code",
   "heartbeat",
   "recover_stalled_jobs",
+  "users.send_email_changed_notice",
   "users.send_welcome_email"
 ]

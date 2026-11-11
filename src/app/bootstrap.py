@@ -13,6 +13,7 @@ from app.core.jobs.queue import JobQueue, build_job_app
 from app.core.resources import Resources
 from app.modules.auth import models as auth_models
 from app.modules.auth import public as auth
+from app.modules.auth import tasks as auth_tasks
 from app.modules.users import models as users_models
 from app.modules.users import tasks as users_tasks
 
@@ -20,7 +21,7 @@ API_TIMEOUTS = "-c statement_timeout=5s -c idle_in_transaction_session_timeout=3
 HASHING_THREADS = 4
 
 MODELS = (auth_models, users_models)
-BLUEPRINTS = (periodic.blueprint, users_tasks.blueprint)
+BLUEPRINTS = (periodic.blueprint, auth_tasks.blueprint, users_tasks.blueprint)
 metadata = Base.metadata
 job_app = build_job_app(BLUEPRINTS)
 

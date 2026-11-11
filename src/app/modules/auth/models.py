@@ -24,3 +24,15 @@ class LoginSession(Base):
     )
     token_hash: Mapped[bytes] = mapped_column(unique=True)
     expires_at: Mapped[datetime]
+
+
+class VerificationCode(Base):
+    __tablename__ = "auth_verification_codes"
+
+    email: Mapped[str] = mapped_column(unique=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    seed: Mapped[bytes]
+    code_mac: Mapped[bytes | None]
+    expires_at: Mapped[datetime]

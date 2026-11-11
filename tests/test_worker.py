@@ -22,6 +22,7 @@ from tests.jobs import (
     FinishSoon,
     Hang,
     Meet,
+    RecordEnvironment,
     RecordTimeouts,
     RenameUser,
     RollbackError,
@@ -151,6 +152,24 @@ async def test_worker_connections_allow_a_minute_per_statement(
     async with sessionmaker() as session:
         recorded = await session.get_one(User, ada.id)
     assert (statuses, recorded.name) == (["succeeded"], "1min 30s, 1min 30s")
+
+
+@pytest.mark.committed
+async def test_worker_jobs_read_the_worker_settings(
+    settings: Settings,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    resources: Resources,
+) -> None:
+    async with sessionmaker.begin() as session:
+        ada = await make_user(session, name="Ada")
+        payload = RecordEnvironment(user_id=ada.id)
+        job_id = await resources.jobs.defer(session, payload)
+
+    statuses = await work_until_finished(settings, sessionmaker, job_id)
+
+    async with sessionmaker() as session:
+        recorded = await session.get_one(User, ada.id)
+    assert (statuses, recorded.name) == (["succeeded"], "test")
 
 
 @pytest.mark.committed

@@ -7,6 +7,7 @@ import structlog
 from fastapi import Depends, Request
 from fastapi.security import APIKeyCookie, HTTPAuthorizationCredentials, HTTPBearer
 from limits.aio.strategies import MovingWindowRateLimiter
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +47,13 @@ async def db_session(request: Request) -> AsyncIterator[AsyncSession]:
 
 
 DbSession = Annotated[AsyncSession, Depends(db_session, scope="function")]
+
+
+async def get_secret_key(request: Request) -> SecretStr:
+    return get_settings(request).secret_key
+
+
+SecretKey = Annotated[SecretStr, Depends(get_secret_key)]
 
 
 async def get_jobs(request: Request) -> JobQueue:

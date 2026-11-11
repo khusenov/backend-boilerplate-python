@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 import threading
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -52,16 +52,6 @@ def hashing() -> Iterator[RecordingExecutor]:
 @pytest.fixture
 def resources(resources: Resources, hashing: RecordingExecutor) -> Resources:
     return replace(resources, hashing=hashing)
-
-
-@pytest.fixture
-async def resume_hashing(hashing: RecordingExecutor) -> AsyncIterator[threading.Event]:
-    resume = threading.Event()
-    loop = asyncio.get_running_loop()
-    busy = [loop.run_in_executor(hashing, resume.wait, 5) for _ in range(4)]
-    yield resume
-    resume.set()
-    await asyncio.gather(*busy)
 
 
 @pytest.fixture

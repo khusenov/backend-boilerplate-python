@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 from asgi_lifespan import LifespanManager
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from typer.testing import CliRunner, Result
 
@@ -15,7 +15,7 @@ from app.modules.auth.models import Credential, LoginSession
 from app.modules.users.models import User
 from tests.audit import audit_rows
 from tests.clients import bearer, connect
-from tests.factories import make_login_session, make_user
+from tests.factories import count_rows, make_login_session, make_user
 
 ADMIN_PASSWORD = "a long admin password"
 TYPED = f"{ADMIN_PASSWORD}\n" * 2
@@ -34,10 +34,6 @@ def admin_args(email: str, name: str = "Ada") -> list[str]:
     return [email, "--name", name]
 
 
-async def count(session: AsyncSession, model: type[object]) -> int | None:
-    return await session.scalar(select(func.count()).select_from(model))
-
-
 @pytest.mark.committed
 async def test_create_admin_twice_leaves_one_admin(
     sessionmaker: async_sessionmaker[AsyncSession],
@@ -47,7 +43,7 @@ async def test_create_admin_twice_leaves_one_admin(
 
     async with sessionmaker() as session:
         users = list(await session.scalars(select(User)))
-        credentials = await count(session, Credential)
+        credentials = await count_rows(session, Credential)
         events = await audit_rows(session)
     assert (first.exit_code, first.stdout) == (
         0,
@@ -96,7 +92,7 @@ async def test_create_admin_promotes_a_member_and_ends_their_sessions(
 
     async with sessionmaker() as session:
         promoted = await session.get(User, member.id)
-        sessions = await count(session, LoginSession)
+        sessions = await count_rows(session, LoginSession)
     assert result.exit_code == 0
     assert promoted is not None
     assert (promoted.name, promoted.role) == ("Ada Lovelace", Role.ADMIN)
@@ -138,8 +134,13 @@ async def test_create_admin_prompts_for_the_name_and_a_hidden_password(
             "fourteen chars",
             "password: String should have at least 15 characters\n",
         ),
+        (
+            admin_args("ada@example.com"),
+            "correcthorsebatterystaple",
+            "password: Value error, this password is too common\n",
+        ),
     ],
-    ids=["email", "name", "password"],
+    ids=["email", "name", "password", "common password"],
 )
 async def test_create_admin_refuses_invalid_input_and_writes_nothing(
     sessionmaker: async_sessionmaker[AsyncSession],
@@ -150,7 +151,7 @@ async def test_create_admin_refuses_invalid_input_and_writes_nothing(
     result = await create_admin(*args, typed=f"{password}\n" * 2)
 
     async with sessionmaker() as session:
-        users = await count(session, User)
+        users = await count_rows(session, User)
         events = await audit_rows(session)
     assert (result.exit_code, result.stdout) == (2, PROMPTS)
     assert result.stderr.startswith(message)

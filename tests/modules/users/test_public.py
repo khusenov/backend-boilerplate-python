@@ -1,12 +1,14 @@
 import uuid
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.resources import Resources
 from app.core.security import Role
 from app.modules.users import public as users
 from app.modules.users.errors import UserNotFoundError
-from tests.factories import make_user
+from tests.factories import make_user, principal_for
 
 
 @pytest.mark.parametrize(
@@ -45,3 +47,30 @@ async def test_other_modules_find_users_by_email(session: AsyncSession) -> None:
         active=True,
     )
     assert missing is None
+
+
+async def test_email_changes_trim_and_lowercase_the_address(
+    session: AsyncSession, resources: Resources
+) -> None:
+    user = await make_user(session, email="ada@example.com")
+    principal = principal_for(user)
+
+    await users.change_email(
+        session, resources.jobs, principal, None, " Lovelace@Example.COM "
+    )
+
+    assert user.email == "lovelace@example.com"
+
+
+async def test_email_changes_refuse_malformed_addresses(
+    session: AsyncSession, resources: Resources
+) -> None:
+    user = await make_user(session, email="ada@example.com")
+    principal = principal_for(user)
+
+    with pytest.raises(ValidationError):
+        await users.change_email(
+            session, resources.jobs, principal, None, "not an address"
+        )
+
+    assert user.email == "ada@example.com"

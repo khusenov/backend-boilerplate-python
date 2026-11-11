@@ -3,11 +3,21 @@ import uuid
 from datetime import UTC, datetime
 from itertools import count
 
+from pydantic import SecretStr
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import Base
 from app.core.security import Principal
 from app.modules.auth.models import Credential, LoginSession
-from app.modules.auth.service import PASSWORD_HASHER, SESSION_LIFETIME, hash_token
+from app.modules.auth.service import (
+    PASSWORD_HASHER,
+    SESSION_LIFETIME,
+    find_verification_code,
+    hash_token,
+    issue_code,
+    save_verification_code,
+)
 from app.modules.users.models import User
 
 PASSWORD = "correct horse battery staple"
@@ -48,5 +58,27 @@ async def make_login_session(
     return token
 
 
+async def make_code(
+    session: AsyncSession, secret_key: SecretStr, email: str, **overrides: object
+) -> str:
+    code_id = await save_verification_code(session, email, user_id=None)
+    verification = await find_verification_code(session, code_id)
+    assert verification is not None
+    code = await issue_code(session, secret_key, verification)
+    assert code is not None
+    for name, value in overrides.items():
+        setattr(verification, name, value)
+    await session.flush()
+    return code
+
+
+def wrong_code(code: str) -> str:
+    return f"{(int(code) + 1) % 1_000_000:06d}"
+
+
 def principal_for(user: User) -> Principal:
     return Principal(user_id=user.id, session_id=uuid.uuid7(), role=user.role)
+
+
+async def count_rows(session: AsyncSession, model: type[Base]) -> int:
+    return (await session.execute(select(func.count()).select_from(model))).scalar_one()

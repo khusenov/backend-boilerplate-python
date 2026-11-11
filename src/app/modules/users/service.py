@@ -13,7 +13,9 @@ from app.core.security import Permission, Principal, Role
 from app.modules.users.errors import EmailTakenError, UserNotFoundError
 from app.modules.users.models import User, UserStatus
 from app.modules.users.schemas import (
+    EmailUpdate,
     ProfileUpdate,
+    SendEmailChangedNotice,
     SendWelcomeEmail,
     UserCreate,
     UserUpdate,
@@ -135,6 +137,29 @@ async def update_user(
             changes={"role": data.role},
         )
     await flush(session, {})
+    return user
+
+
+async def change_email(
+    session: AsyncSession,
+    jobs: JobQueue,
+    principal: Principal,
+    client_ip: str | None,
+    data: EmailUpdate,
+) -> User:
+    user = await get_user(session, principal, principal.user_id, for_update=True)
+    old_email = user.email
+    user.email = data.email
+    audit.record(
+        session,
+        "users.email_changed",
+        actor_id=principal.user_id,
+        target_id=user.id,
+        client_ip=client_ip,
+        changes={"email": data.email},
+    )
+    await flush(session, {"uq_users_email": EmailTakenError})
+    await jobs.defer(session, SendEmailChangedNotice(old_email=old_email))
     return user
 
 

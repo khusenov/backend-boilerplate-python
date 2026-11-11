@@ -1,6 +1,9 @@
+import re
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncConnection
+
+CODE = re.compile(r"\b[0-9]{6}\b")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -8,6 +11,12 @@ class SentEmail:
     to: str
     subject: str
     text: str
+
+
+def code_in(email: SentEmail) -> str:
+    found = CODE.search(email.text)
+    assert found is not None
+    return found.group()
 
 
 @dataclass(slots=True)

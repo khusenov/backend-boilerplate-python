@@ -14,6 +14,7 @@ from procrastinate.middleware import AsyncCallNext
 from procrastinate.tasks import Task
 from procrastinate.worker import Worker
 
+from app.core.config import Settings
 from app.core.jobs.queue import Message
 from app.core.resources import Resources
 
@@ -53,6 +54,13 @@ def resources_of(context: JobContext) -> Resources:
     if not isinstance(resources, Resources):
         raise TypeError("the worker was started without Resources")
     return resources
+
+
+def settings_of(context: JobContext) -> Settings:
+    settings = cast(dict[str, object], context.additional_context).get("settings")
+    if not isinstance(settings, Settings):
+        raise TypeError("the worker was started without Settings")
+    return settings
 
 
 def task[P: Message](

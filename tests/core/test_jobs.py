@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
@@ -19,7 +20,7 @@ from app.core.errors import ConflictError
 from app.core.http.deps import DbSession, Jobs
 from app.core.jobs.periodic import heartbeat
 from app.core.jobs.queue import Message
-from app.core.jobs.tasks import RETRY, resources_of
+from app.core.jobs.tasks import RETRY, resources_of, settings_of
 from app.core.logging import configure_logging
 from app.core.resources import Resources
 from app.core.sentry import configure_sentry
@@ -440,11 +441,18 @@ def test_retries_double_from_two_seconds_up_to_an_hour() -> None:
     ]
 
 
-def test_jobs_need_the_worker_to_carry_resources() -> None:
+@pytest.mark.parametrize(
+    ("read", "missing"),
+    [(settings_of, "Settings"), (resources_of, "Resources")],
+    ids=["settings", "resources"],
+)
+def test_jobs_need_the_worker_to_carry_settings_and_resources(
+    read: Callable[[JobContext], object], missing: str
+) -> None:
     job = Job(id=1, queue="default", lock=None, queueing_lock=None, task_name="x")
     context = JobContext(
         app=job_app, job=job, start_timestamp=0.0, abort_reason=lambda: None
     )
 
-    with pytest.raises(TypeError, match="without Resources"):
-        resources_of(context)
+    with pytest.raises(TypeError, match=f"without {missing}"):
+        read(context)
