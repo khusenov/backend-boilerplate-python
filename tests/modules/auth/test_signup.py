@@ -13,7 +13,7 @@ from sqlalchemy.pool import QueuePool
 from app.core.config import Settings
 from app.core.resources import Resources
 from app.modules.auth.models import Credential, VerificationCode
-from app.modules.auth.service import GUESSES_PER_EMAIL
+from app.modules.auth.service.limits import GUESSES_PER_EMAIL
 from app.modules.users.models import User
 from tests.clients import connect, problem, reply
 from tests.factories import PASSWORD, count_rows, make_code, make_user, wrong_code

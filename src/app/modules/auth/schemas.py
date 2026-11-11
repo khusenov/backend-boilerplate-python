@@ -26,6 +26,7 @@ NewPassword = Annotated[
     str, Field(min_length=15, max_length=128), AfterValidator(check_uncommon)
 ]
 Code = Annotated[str, StringConstraints(max_length=6, pattern=r"^[0-9]{6}$")]
+Token = Annotated[str, StringConstraints(max_length=43, pattern=r"^[A-Za-z0-9_-]{43}$")]
 
 
 class Login(Schema):
@@ -65,7 +66,33 @@ class EmailChangeConfirm(Schema):
     code: Code
 
 
+class PasswordReset(Schema):
+    email: Email
+
+
+class PasswordResetConfirm(Schema):
+    token: Token
+    password: NewPassword
+
+
+class PasswordChange(Schema):
+    current_password: Password
+    new_password: NewPassword
+
+
 class SendCode(Message):
     task_name: ClassVar[str] = "auth.send_code"
 
     code_id: uuid.UUID
+
+
+class SendResetToken(Message):
+    task_name: ClassVar[str] = "auth.send_reset_token"
+
+    reset_id: uuid.UUID
+
+
+class SendPasswordChangedNotice(Message):
+    task_name: ClassVar[str] = "auth.send_password_changed_notice"
+
+    user_id: uuid.UUID

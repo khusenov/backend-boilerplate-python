@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 CODE = re.compile(r"\b[0-9]{6}\b")
+TOKEN = re.compile(r"use this token: ([A-Za-z0-9_-]{43})\n")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -17,6 +18,12 @@ def code_in(email: SentEmail) -> str:
     found = CODE.search(email.text)
     assert found is not None
     return found.group()
+
+
+def token_in(email: SentEmail) -> str:
+    found = TOKEN.search(email.text)
+    assert found is not None
+    return found.group(1)
 
 
 @dataclass(slots=True)

@@ -36,3 +36,15 @@ class VerificationCode(Base):
     seed: Mapped[bytes]
     code_mac: Mapped[bytes | None]
     expires_at: Mapped[datetime]
+
+
+class ResetToken(Base):
+    __tablename__ = "auth_reset_tokens"
+
+    email: Mapped[str] = mapped_column(unique=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    seed: Mapped[bytes]
+    token_hash: Mapped[bytes | None] = mapped_column(unique=True)
+    expires_at: Mapped[datetime]

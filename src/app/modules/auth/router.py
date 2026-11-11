@@ -14,17 +14,20 @@ from app.core.http.deps import (
     require_trusted_origin,
 )
 from app.core.security import Permission
-from app.modules.auth import service
 from app.modules.auth.schemas import (
     EmailChange,
     EmailChangeConfirm,
     Login,
+    PasswordChange,
+    PasswordReset,
+    PasswordResetConfirm,
     Signup,
     SignupConfirm,
     TokenRead,
 )
+from app.modules.auth.service import passwords, sessions, verification
 
-SESSION_MAX_AGE = int(service.SESSION_LIFETIME.total_seconds())
+SESSION_MAX_AGE = int(sessions.SESSION_LIFETIME.total_seconds())
 
 anonymous_router = APIRouter(prefix="/auth", route_class=AnonymousRoute)
 router = APIRouter(prefix="/auth")
@@ -45,7 +48,7 @@ async def create_session(
     client_ip: ClientIp,
     response: Response,
 ) -> None:
-    token, _ = await service.log_in(
+    token, _ = await sessions.log_in(
         session, limiter, hashing, hashing_slots, client_ip, body
     )
     response.set_cookie(
@@ -67,7 +70,7 @@ async def create_token(
     hashing_slots: HashingSlots,
     client_ip: ClientIp,
 ) -> TokenRead:
-    token, login = await service.log_in(
+    token, login = await sessions.log_in(
         session, limiter, hashing, hashing_slots, client_ip, body
     )
     return TokenRead(token=token, expires_at=login.expires_at)
@@ -81,7 +84,7 @@ async def request_signup(
     limiter: Limiter,
     client_ip: ClientIp,
 ) -> None:
-    await service.request_signup(session, jobs, limiter, client_ip, body)
+    await verification.request_signup(session, jobs, limiter, client_ip, body)
 
 
 @anonymous_router.post("/signup/confirm", status_code=204, response_class=Response)
@@ -95,8 +98,35 @@ async def confirm_signup(
     secret_key: SecretKey,
     client_ip: ClientIp,
 ) -> None:
-    await service.confirm_signup(
+    await verification.confirm_signup(
         session, jobs, limiter, hashing, hashing_slots, secret_key, client_ip, body
+    )
+
+
+@anonymous_router.post("/password-reset", status_code=202, response_class=Response)
+async def request_password_reset(
+    body: PasswordReset,
+    session: DbSession,
+    jobs: Jobs,
+    limiter: Limiter,
+    client_ip: ClientIp,
+) -> None:
+    await passwords.request_password_reset(session, jobs, limiter, client_ip, body)
+
+
+@anonymous_router.post(
+    "/password-reset/confirm", status_code=204, response_class=Response
+)
+async def confirm_password_reset(
+    body: PasswordResetConfirm,
+    session: DbSession,
+    limiter: Limiter,
+    hashing: Hashing,
+    hashing_slots: HashingSlots,
+    client_ip: ClientIp,
+) -> None:
+    await passwords.confirm_password_reset(
+        session, limiter, hashing, hashing_slots, client_ip, body
     )
 
 
@@ -109,7 +139,7 @@ async def confirm_signup(
 async def delete_session(
     principal: CurrentPrincipal, session: DbSession, response: Response
 ) -> None:
-    await service.log_out(session, principal.session_id)
+    await sessions.log_out(session, principal.session_id)
     response.delete_cookie(SESSION_COOKIE, secure=True, httponly=True, samesite="lax")
 
 
@@ -128,7 +158,7 @@ async def request_email_change(
     hashing: Hashing,
     client_ip: ClientIp,
 ) -> None:
-    await service.request_email_change(
+    await verification.request_email_change(
         session, jobs, limiter, hashing, principal, client_ip, body
     )
 
@@ -148,6 +178,28 @@ async def confirm_email_change(
     secret_key: SecretKey,
     client_ip: ClientIp,
 ) -> None:
-    await service.confirm_email_change(
+    await verification.confirm_email_change(
         session, jobs, limiter, secret_key, principal, client_ip, body
     )
+
+
+@router.post(
+    "/password-change",
+    status_code=204,
+    response_class=Response,
+    dependencies=[require(Permission.USERS_WRITE_SELF)],
+)
+async def change_password(
+    body: PasswordChange,
+    principal: CurrentPrincipal,
+    session: DbSession,
+    jobs: Jobs,
+    limiter: Limiter,
+    hashing: Hashing,
+    client_ip: ClientIp,
+    response: Response,
+) -> None:
+    await passwords.change_password(
+        session, jobs, limiter, hashing, principal, client_ip, body
+    )
+    response.delete_cookie(SESSION_COOKIE, secure=True, httponly=True, samesite="lax")
