@@ -1,4 +1,31 @@
 {
+  "auth.send_code": {
+    "properties": {
+      "code_id": {
+        "format": "uuid",
+        "title": "Code Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "code_id"
+    ],
+    "title": "SendCode",
+    "type": "object"
+  },
+  "users.send_email_changed_notice": {
+    "properties": {
+      "old_email": {
+        "title": "Old Email",
+        "type": "string"
+      }
+    },
+    "required": [
+      "old_email"
+    ],
+    "title": "SendEmailChangedNotice",
+    "type": "object"
+  },
   "users.send_welcome_email": {
     "properties": {
       "user_id": {

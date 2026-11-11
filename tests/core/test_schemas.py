@@ -77,6 +77,12 @@ def test_emails_refuse_what_mail_reads_as_another_address(email: str) -> None:
         Contact(email=email)
 
 
+@pytest.mark.parametrize("email", ["ädä@example.com", "ada@exämple.com"])
+def test_emails_are_printable_ascii(email: str) -> None:
+    with pytest.raises(ValidationError):
+        Contact(email=email)
+
+
 @pytest.mark.parametrize(
     ("at", "text"),
     [

@@ -190,10 +190,12 @@ def resources(
 
 
 @pytest.fixture
-async def run_jobs(connection: AsyncConnection, resources: Resources) -> jobs.RunJobs:
+async def run_jobs(
+    connection: AsyncConnection, settings: Settings, resources: Resources
+) -> jobs.RunJobs:
     raw = await connection.get_raw_connection()
     driver = cast(psycopg.AsyncConnection[Any], raw.driver_connection)
-    return partial(jobs.run_jobs, driver, resources)
+    return partial(jobs.run_jobs, driver, settings, resources)
 
 
 @pytest.fixture

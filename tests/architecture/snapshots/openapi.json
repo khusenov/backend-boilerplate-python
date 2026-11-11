@@ -1,6 +1,50 @@
 {
   "components": {
     "schemas": {
+      "EmailChange": {
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "pattern": "^[!#-'*+\\-./0-9=?A-Z^-~]+@[!#-'*+\\-./0-9=?A-Z^-~]+\\.[!#-'*+\\-./0-9=?A-Z^-~]+$",
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "EmailChange",
+        "type": "object"
+      },
+      "EmailChangeConfirm": {
+        "properties": {
+          "code": {
+            "maxLength": 6,
+            "pattern": "^[0-9]{6}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "email": {
+            "maxLength": 254,
+            "pattern": "^[!#-'*+\\-./0-9=?A-Z^-~]+@[!#-'*+\\-./0-9=?A-Z^-~]+\\.[!#-'*+\\-./0-9=?A-Z^-~]+$",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ],
+        "title": "EmailChangeConfirm",
+        "type": "object"
+      },
       "InvalidParam": {
         "properties": {
           "detail": {
@@ -42,7 +86,7 @@
         "properties": {
           "email": {
             "maxLength": 254,
-            "pattern": "^[^@\\s\\x00-\\x1f\\x7f()<>\\[\\]:;,\"\\\\]+@[^@\\s\\x00-\\x1f\\x7f()<>\\[\\]:;,\"\\\\]+\\.[^@\\s\\x00-\\x1f\\x7f()<>\\[\\]:;,\"\\\\]+$",
+            "pattern": "^[!#-'*+\\-./0-9=?A-Z^-~]+@[!#-'*+\\-./0-9=?A-Z^-~]+\\.[!#-'*+\\-./0-9=?A-Z^-~]+$",
             "title": "Email",
             "type": "string"
           },
@@ -141,6 +185,58 @@
         "title": "Role",
         "type": "string"
       },
+      "Signup": {
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "pattern": "^[!#-'*+\\-./0-9=?A-Z^-~]+@[!#-'*+\\-./0-9=?A-Z^-~]+\\.[!#-'*+\\-./0-9=?A-Z^-~]+$",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "Signup",
+        "type": "object"
+      },
+      "SignupConfirm": {
+        "properties": {
+          "code": {
+            "maxLength": 6,
+            "pattern": "^[0-9]{6}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "email": {
+            "maxLength": 254,
+            "pattern": "^[!#-'*+\\-./0-9=?A-Z^-~]+@[!#-'*+\\-./0-9=?A-Z^-~]+\\.[!#-'*+\\-./0-9=?A-Z^-~]+$",
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 15,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "code",
+          "name",
+          "password"
+        ],
+        "title": "SignupConfirm",
+        "type": "object"
+      },
       "TokenRead": {
         "properties": {
           "expires_at": {
@@ -164,7 +260,7 @@
         "properties": {
           "email": {
             "maxLength": 254,
-            "pattern": "^[^@\\s\\x00-\\x1f\\x7f()<>\\[\\]:;,\"\\\\]+@[^@\\s\\x00-\\x1f\\x7f()<>\\[\\]:;,\"\\\\]+\\.[^@\\s\\x00-\\x1f\\x7f()<>\\[\\]:;,\"\\\\]+$",
+            "pattern": "^[!#-'*+\\-./0-9=?A-Z^-~]+@[!#-'*+\\-./0-9=?A-Z^-~]+\\.[!#-'*+\\-./0-9=?A-Z^-~]+$",
             "title": "Email",
             "type": "string"
           },
@@ -348,6 +444,104 @@
         "summary": "Readiness"
       }
     },
+    "/v1/auth/email-change": {
+      "post": {
+        "operationId": "auth_request_email_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "summary": "Request Email Change"
+      }
+    },
+    "/v1/auth/email-change/confirm": {
+      "post": {
+        "operationId": "auth_confirm_email_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "summary": "Confirm Email Change"
+      }
+    },
     "/v1/auth/session": {
       "delete": {
         "operationId": "auth_delete_session",
@@ -424,6 +618,88 @@
           }
         },
         "summary": "Create Session"
+      }
+    },
+    "/v1/auth/signup": {
+      "post": {
+        "operationId": "auth_request_signup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Signup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Request Signup"
+      }
+    },
+    "/v1/auth/signup/confirm": {
+      "post": {
+        "operationId": "auth_confirm_signup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Confirm Signup"
       }
     },
     "/v1/auth/tokens": {

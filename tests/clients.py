@@ -37,3 +37,9 @@ def problem(response: Response) -> tuple[int, str | None]:
     if response.headers.get("content-type") != PROBLEM_JSON:
         return response.status_code, None
     return response.status_code, response.json()["code"]
+
+
+def reply(response: Response) -> tuple[int, list[tuple[str, str]], str]:
+    request_id = response.headers["x-request-id"]
+    headers = [item for item in response.headers.items() if item[0] != "x-request-id"]
+    return response.status_code, headers, response.text.replace(request_id, "")

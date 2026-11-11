@@ -8,12 +8,21 @@ from app.core.http.deps import (
     DbSession,
     Hashing,
     HashingSlots,
+    Jobs,
     Limiter,
+    SecretKey,
     require_trusted_origin,
 )
 from app.core.security import Permission
 from app.modules.auth import service
-from app.modules.auth.schemas import Login, TokenRead
+from app.modules.auth.schemas import (
+    EmailChange,
+    EmailChangeConfirm,
+    Login,
+    Signup,
+    SignupConfirm,
+    TokenRead,
+)
 
 SESSION_MAX_AGE = int(service.SESSION_LIFETIME.total_seconds())
 
@@ -64,6 +73,33 @@ async def create_token(
     return TokenRead(token=token, expires_at=login.expires_at)
 
 
+@anonymous_router.post("/signup", status_code=202, response_class=Response)
+async def request_signup(
+    body: Signup,
+    session: DbSession,
+    jobs: Jobs,
+    limiter: Limiter,
+    client_ip: ClientIp,
+) -> None:
+    await service.request_signup(session, jobs, limiter, client_ip, body)
+
+
+@anonymous_router.post("/signup/confirm", status_code=204, response_class=Response)
+async def confirm_signup(
+    body: SignupConfirm,
+    session: DbSession,
+    jobs: Jobs,
+    limiter: Limiter,
+    hashing: Hashing,
+    hashing_slots: HashingSlots,
+    secret_key: SecretKey,
+    client_ip: ClientIp,
+) -> None:
+    await service.confirm_signup(
+        session, jobs, limiter, hashing, hashing_slots, secret_key, client_ip, body
+    )
+
+
 @router.delete(
     "/session",
     status_code=204,
@@ -75,3 +111,43 @@ async def delete_session(
 ) -> None:
     await service.log_out(session, principal.session_id)
     response.delete_cookie(SESSION_COOKIE, secure=True, httponly=True, samesite="lax")
+
+
+@router.post(
+    "/email-change",
+    status_code=202,
+    response_class=Response,
+    dependencies=[require(Permission.USERS_WRITE_SELF)],
+)
+async def request_email_change(
+    body: EmailChange,
+    principal: CurrentPrincipal,
+    session: DbSession,
+    jobs: Jobs,
+    limiter: Limiter,
+    hashing: Hashing,
+    client_ip: ClientIp,
+) -> None:
+    await service.request_email_change(
+        session, jobs, limiter, hashing, principal, client_ip, body
+    )
+
+
+@router.post(
+    "/email-change/confirm",
+    status_code=204,
+    response_class=Response,
+    dependencies=[require(Permission.USERS_WRITE_SELF)],
+)
+async def confirm_email_change(
+    body: EmailChangeConfirm,
+    principal: CurrentPrincipal,
+    session: DbSession,
+    jobs: Jobs,
+    limiter: Limiter,
+    secret_key: SecretKey,
+    client_ip: ClientIp,
+) -> None:
+    await service.confirm_email_change(
+        session, jobs, limiter, secret_key, principal, client_ip, body
+    )

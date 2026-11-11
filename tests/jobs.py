@@ -16,8 +16,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bootstrap import job_app
+from app.core.config import Settings
 from app.core.jobs.queue import JobQueue, Message, driver_connection
-from app.core.jobs.tasks import observe_job, resources_of, task
+from app.core.jobs.tasks import observe_job, resources_of, settings_of, task
 from app.core.resources import Resources
 from app.modules.users.models import User
 
@@ -46,6 +47,12 @@ class SendDigest(Message):
 
 class RecordTimeouts(Message):
     task_name: ClassVar[str] = "tests.record_timeouts"
+
+    user_id: uuid.UUID
+
+
+class RecordEnvironment(Message):
+    task_name: ClassVar[str] = "tests.record_environment"
 
     user_id: uuid.UUID
 
@@ -85,6 +92,13 @@ async def record_timeouts(context: JobContext, payload: RecordTimeouts) -> None:
     async with resources_of(context).sessionmaker.begin() as session:
         user = await session.get_one(User, payload.user_id)
         user.name = f"{await session.scalar(text(TIMEOUTS))}, {queue['timeouts']}"
+
+
+@task(blueprint, RecordEnvironment)
+async def record_environment(context: JobContext, payload: RecordEnvironment) -> None:
+    async with resources_of(context).sessionmaker.begin() as session:
+        user = await session.get_one(User, payload.user_id)
+        user.name = settings_of(context).app_env
 
 
 @task(blueprint, Meet)
@@ -134,7 +148,7 @@ class SingleConnectionPool:
 
 
 async def run_jobs(
-    connection: psycopg.AsyncConnection[Any], resources: Resources
+    connection: psycopg.AsyncConnection[Any], settings: Settings, resources: Resources
 ) -> None:
     errors: list[BaseException] = []
 
@@ -160,7 +174,7 @@ async def run_jobs(
                 install_signal_handlers=False,
                 concurrency=1,
                 stalled_worker_timeout=timedelta(days=1).total_seconds(),
-                additional_context={"resources": resources},
+                additional_context={"settings": settings, "resources": resources},
                 worker_middleware=[observe_job, reraise],
             )
     finally:

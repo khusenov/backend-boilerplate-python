@@ -1,6 +1,8 @@
 {
+  "auth.invalid_code": 403,
   "auth.invalid_credentials": 401,
   "auth.too_many_attempts": 429,
+  "auth.wrong_password": 403,
   "bad_request": 400,
   "content_too_large": 413,
   "internal_server_error": 500,
