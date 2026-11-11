@@ -33,24 +33,13 @@ from tests.jobs import (
     mark_running,
     meeting,
     set_attempts,
+    work_until_finished,
 )
 from tests.sentry import FAKE_DSN, capture_sentry
 
 HEARTBEAT_DONE = re.compile(
     r"Job heartbeat\[\d+\]\(timestamp=\d+\) ended with status: Success"
 )
-
-
-async def finished_status(
-    sessionmaker: async_sessionmaker[AsyncSession], job_id: int
-) -> str:
-    async with asyncio.timeout(10):
-        while True:
-            async with sessionmaker() as session:
-                status = (await job_row(session, job_id)).status
-            if status not in {"todo", "doing"}:
-                return status
-            await asyncio.sleep(0.1)
 
 
 async def wait_until_running(
@@ -63,16 +52,6 @@ async def wait_until_running(
             if statuses == {"doing"}:
                 return
             await asyncio.sleep(0.1)
-
-
-async def work_until_finished(
-    settings: Settings, sessionmaker: async_sessionmaker[AsyncSession], *jobs: int
-) -> list[str]:
-    async with asyncio.TaskGroup() as group:
-        worker = group.create_task(work(settings))
-        statuses = [await finished_status(sessionmaker, job_id) for job_id in jobs]
-        worker.cancel()
-    return statuses
 
 
 async def read_until(stream: StreamReader, pattern: re.Pattern[str]) -> str:

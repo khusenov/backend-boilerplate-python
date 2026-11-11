@@ -27,7 +27,7 @@ SESSION_LIFETIME = timedelta(days=30)
 
 
 async def find_credential(session: AsyncSession, email: str) -> Credential | None:
-    user = await users.find_user_by_email(session, email)
+    user = await users.find_user_by_email(session, email, for_share=True)
     if user is None or not user.active:
         return None
     statement = (

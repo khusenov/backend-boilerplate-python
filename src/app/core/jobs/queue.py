@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, cast
 
@@ -11,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class Message(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
+
+class Payload(Message):
     task_name: ClassVar[str]
+
+
+class Event(Message):
+    event_type: ClassVar[str]
 
 
 def build_job_app(blueprints: Iterable[Blueprint]) -> App:
@@ -30,8 +36,9 @@ async def driver_connection(session: AsyncSession) -> psycopg.AsyncConnection[An
 @dataclass(frozen=True, slots=True)
 class JobQueue:
     app: App
+    subscribers: Mapping[str, tuple[str, ...]]
 
-    async def defer(self, session: AsyncSession, payload: Message) -> int:
+    async def defer(self, session: AsyncSession, payload: Payload) -> int:
         async with session.begin_nested():
             deferrer = self.app.configure_task(
                 payload.task_name,
@@ -39,3 +46,12 @@ class JobQueue:
                 connection=await driver_connection(session),
             )
             return await deferrer.defer_async(**payload.model_dump(mode="json"))
+
+    async def publish(self, session: AsyncSession, event: Event) -> None:
+        fields = event.model_dump(mode="json")
+        connection = await driver_connection(session)
+        for task_name in self.subscribers.get(event.event_type, ()):
+            deferrer = self.app.configure_task(
+                task_name, allow_unknown=False, connection=connection
+            )
+            await deferrer.defer_async(**fields)

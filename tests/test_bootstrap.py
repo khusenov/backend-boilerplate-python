@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from app.bootstrap import build_resources, job_app
+from app.bootstrap import SUBSCRIBERS, build_resources, job_app
 from app.core.config import Settings
 from app.core.email import SmtpEmailSender
 from app.core.resources import Resources
@@ -124,8 +124,9 @@ def test_principals_come_from_auth(built_resources: Resources) -> None:
     assert built_resources.authenticate is auth.authenticate
 
 
-def test_jobs_share_the_process_job_app(built_resources: Resources) -> None:
+def test_jobs_share_the_job_app_and_the_subscribers(built_resources: Resources) -> None:
     assert built_resources.jobs.app is job_app
+    assert built_resources.jobs.subscribers is SUBSCRIBERS
 
 
 async def test_email_uses_every_smtp_setting_and_a_ten_second_timeout(

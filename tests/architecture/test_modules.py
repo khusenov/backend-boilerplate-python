@@ -1,6 +1,7 @@
 import ast
 import importlib
 import inspect
+import operator
 import pkgutil
 import re
 import typing
@@ -19,13 +20,14 @@ from app.core.db import Base
 from app.core.errors import AppError
 from app.core.jobs import periodic
 from app.core.jobs import tasks as core_tasks
-from app.core.jobs.queue import Message
+from app.core.jobs.queue import Event, Payload
 from app.core.jobs.tasks import RETRY
 from app.core.schemas import Schema
 from app.main import create_app
 from tests.architecture.inventory import (
     app_error_classes,
     app_errors,
+    app_events,
     app_models,
     app_subclasses,
     models_in,
@@ -109,6 +111,17 @@ def email_sends(path: Path) -> Iterator[int]:
                 yield node.lineno
 
 
+def subscriptions_in(module: ModuleType) -> Iterator[tuple[str, str]]:
+    for node in ast.walk(ast.parse(inspect.getsource(module))):
+        match node:
+            case ast.Call(
+                func=ast.Name(id="subscriber") | ast.Attribute(attr="subscriber"),
+                args=[_, event],
+                keywords=[ast.keyword(arg="name", value=ast.Constant(value=str(name)))],
+            ):
+                yield operator.attrgetter(ast.unparse(event))(module).event_type, name
+
+
 def mentioned_names(path: Path) -> Iterator[tuple[int, str]]:
     for node in ast.walk(ast.parse(path.read_text())):
         match node:
@@ -178,6 +191,10 @@ def is_dto(value: object) -> bool:
         and issubclass(value, Schema)
         and value.model_config.get("frozen") is True
     )
+
+
+def is_event_type(value: object) -> bool:
+    return isinstance(value, type) and issubclass(value, Event)
 
 
 def shared_models(value: object) -> Iterator[type[BaseModel]]:
@@ -312,13 +329,16 @@ def test_public_modules_import_internals_privately() -> None:
     assert unlisted == []
 
 
-def test_public_modules_export_session_taking_functions_and_dtos() -> None:
+def test_public_modules_export_session_taking_functions_dtos_and_events() -> None:
     publics = public_modules()
     unexpected = [
         f"{public.__name__}.{name}"
         for public in publics
         for name in public.__all__
-        if not (takes_a_session(getattr(public, name)) or is_dto(getattr(public, name)))
+        if not any(
+            check(getattr(public, name))
+            for check in (takes_a_session, is_dto, is_event_type)
+        )
     ]
 
     assert publics
@@ -479,9 +499,58 @@ def test_payloads_name_registered_tasks() -> None:
     registered = set(task_names())
     unregistered = [
         f"{payload.__module__}.{payload.__qualname__}"
-        for payload in app_subclasses(Message)
-        if payload is not Message
+        for payload in app_subclasses(Payload)
+        if payload is not Payload
         and getattr(payload, "task_name", None) not in registered
     ]
 
     assert unregistered == []
+
+
+def test_event_types_carry_their_module_name_and_version() -> None:
+    events = app_events()
+    misnamed = [
+        f"{event.__module__}.{event.__qualname__}: {event.event_type}"
+        for event in events
+        if not re.fullmatch(
+            rf"{name_pattern(module_of(event.__module__))}\.v[1-9][0-9]*",
+            event.event_type,
+        )
+    ]
+
+    assert events
+    assert misnamed == []
+
+
+def test_only_the_event_base_lacks_a_type() -> None:
+    typeless = [
+        f"{event.__module__}.{event.__qualname__}"
+        for event in app_subclasses(Event)
+        if event is not Event and not hasattr(event, "event_type")
+    ]
+
+    assert typeless == []
+
+
+def test_event_types_are_unique() -> None:
+    event_types = [event.event_type for event in app_events()]
+    shared = sorted({name for name in event_types if event_types.count(name) > 1})
+
+    assert event_types
+    assert shared == []
+
+
+def test_bootstrap_subscribes_exactly_the_declared_subscribers() -> None:
+    declared = sorted(
+        subscription
+        for module in task_modules()
+        for subscription in subscriptions_in(module)
+    )
+    listed = sorted(
+        (event_type, name)
+        for event_type, names in bootstrap.SUBSCRIBERS.items()
+        for name in names
+    )
+
+    assert declared
+    assert listed == declared

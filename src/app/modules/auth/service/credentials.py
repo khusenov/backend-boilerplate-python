@@ -74,6 +74,10 @@ async def void_reset_tokens(session: AsyncSession, user: users.UserDTO) -> None:
     )
 
 
+async def delete_sessions(session: AsyncSession, user_id: uuid.UUID) -> None:
+    await session.execute(delete(LoginSession).where(LoginSession.user_id == user_id))
+
+
 async def set_password(
     session: AsyncSession, hashing: Executor, user: users.UserDTO, data: PasswordSet
 ) -> None:
@@ -90,7 +94,7 @@ async def set_password(
             },
         )
     )
-    await session.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
+    await delete_sessions(session, user.id)
 
 
 async def create_admin(

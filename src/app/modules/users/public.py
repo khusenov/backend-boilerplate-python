@@ -6,10 +6,11 @@ from app.core.jobs.queue import JobQueue
 from app.core.security import Principal
 from app.modules.users import schemas as _schemas
 from app.modules.users import service as _service
-from app.modules.users.schemas import UserDTO
+from app.modules.users.schemas import UserDeactivated, UserDTO
 
 __all__ = [
     "UserDTO",
+    "UserDeactivated",
     "change_email",
     "create_admin",
     "create_user",
@@ -23,8 +24,10 @@ async def get_user(session: AsyncSession, user_id: uuid.UUID) -> UserDTO:
     return UserDTO.model_validate(user)
 
 
-async def find_user_by_email(session: AsyncSession, email: str) -> UserDTO | None:
-    user = await _service.find_user_by_email(session, email)
+async def find_user_by_email(
+    session: AsyncSession, email: str, *, for_share: bool = False
+) -> UserDTO | None:
+    user = await _service.find_user_by_email(session, email, for_share=for_share)
     return None if user is None else UserDTO.model_validate(user)
 
 

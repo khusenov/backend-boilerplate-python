@@ -4,7 +4,7 @@ from typing import Annotated, ClassVar
 
 from pydantic import AfterValidator, ConfigDict, Field, StringConstraints
 
-from app.core.jobs.queue import Message
+from app.core.jobs.queue import Payload
 from app.core.schemas import Email, Name, Schema, Timestamp
 
 COMMON_PASSWORDS = frozenset(
@@ -80,19 +80,19 @@ class PasswordChange(Schema):
     new_password: NewPassword
 
 
-class SendCode(Message):
+class SendCode(Payload):
     task_name: ClassVar[str] = "auth.send_code"
 
     code_id: uuid.UUID
 
 
-class SendResetToken(Message):
+class SendResetToken(Payload):
     task_name: ClassVar[str] = "auth.send_reset_token"
 
     reset_id: uuid.UUID
 
 
-class SendPasswordChangedNotice(Message):
+class SendPasswordChangedNotice(Payload):
     task_name: ClassVar[str] = "auth.send_password_changed_notice"
 
     user_id: uuid.UUID

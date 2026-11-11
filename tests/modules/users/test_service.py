@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import StatementError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bootstrap import job_app
+from app.bootstrap import SUBSCRIBERS, job_app
 from app.core.jobs.queue import JobQueue
 from app.core.pagination import PageQuery
 from app.core.security import Principal, Role
@@ -20,22 +20,23 @@ from app.modules.users.schemas import (
     SendEmailChangedNotice,
     SendWelcomeEmail,
     UserCreate,
+    UserDeactivated,
     UserUpdate,
 )
 from tests.audit import audit_rows
 from tests.factories import make_user, principal_for
-from tests.jobs import job_ids, job_row
+from tests.jobs import deferred_jobs, job_ids, job_row
 from tests.statements import first_words, record_statements
 
 ADMIN = Principal(user_id=uuid.uuid7(), session_id=uuid.uuid7(), role=Role.ADMIN)
-JOBS = JobQueue(job_app)
+JOBS = JobQueue(job_app, SUBSCRIBERS)
 CHANGE = EmailUpdate(email="lovelace@example.com")
 
 type Write = Callable[[AsyncSession, User], Awaitable[User]]
 
 
 async def deactivate(session: AsyncSession, user: User) -> User:
-    return await service.deactivate_user(session, ADMIN, None, user.id)
+    return await service.deactivate_user(session, JOBS, ADMIN, None, user.id)
 
 
 async def promote(session: AsyncSession, user: User) -> User:
@@ -114,7 +115,7 @@ async def test_deactivated_users_leave_every_view(session: AsyncSession) -> None
     with pytest.raises(UserNotFoundError):
         await service.get_user(session, ADMIN, gone.id)
     with pytest.raises(UserNotFoundError):
-        await service.deactivate_user(session, ADMIN, None, gone.id)
+        await service.deactivate_user(session, JOBS, ADMIN, None, gone.id)
 
 
 async def test_pages_end_where_the_next_one_starts(session: AsyncSession) -> None:
@@ -162,7 +163,7 @@ async def test_role_changes_are_audited_once(session: AsyncSession) -> None:
 async def test_deactivation_anonymizes_the_user(session: AsyncSession) -> None:
     user = await make_user(session, email="ada@example.com", name="Ada Lovelace")
 
-    await service.deactivate_user(session, ADMIN, "203.0.113.7", user.id)
+    await service.deactivate_user(session, JOBS, ADMIN, "203.0.113.7", user.id)
 
     assert (user.email, user.name, user.status) == (
         f"{user.id}@deactivated",
@@ -179,6 +180,17 @@ async def test_deactivation_anonymizes_the_user(session: AsyncSession) -> None:
             None,
             {"status": "deactivated"},
         )
+    ]
+
+
+async def test_deactivation_publishes_only_the_user_id(session: AsyncSession) -> None:
+    user = await make_user(session)
+
+    await deactivate(session, user)
+
+    subscribers = SUBSCRIBERS[UserDeactivated.event_type]
+    assert await deferred_jobs(session) == [
+        (name, {"user_id": str(user.id)}) for name in subscribers
     ]
 
 
@@ -285,7 +297,7 @@ async def test_locking_reads_refresh_the_row(session: AsyncSession) -> None:
 
 async def test_deactivation_frees_the_email(session: AsyncSession) -> None:
     user = await make_user(session, email="ada@example.com")
-    await service.deactivate_user(session, ADMIN, None, user.id)
+    await service.deactivate_user(session, JOBS, ADMIN, None, user.id)
     data = UserCreate(email="ada@example.com", name="Ada Lovelace")
 
     await service.create_user(session, JOBS, data)
@@ -293,7 +305,7 @@ async def test_deactivation_frees_the_email(session: AsyncSession) -> None:
 
 async def test_no_account_can_claim_a_tombstone(session: AsyncSession) -> None:
     user = await make_user(session)
-    await service.deactivate_user(session, ADMIN, None, user.id)
+    await service.deactivate_user(session, JOBS, ADMIN, None, user.id)
 
     with pytest.raises(ValidationError):
         UserCreate(email=user.email, name="Ada Lovelace")

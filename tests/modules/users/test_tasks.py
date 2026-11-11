@@ -46,7 +46,7 @@ async def test_users_deactivated_before_the_job_runs_get_no_email(
     admin = principal_for(await make_user(session, role=Role.ADMIN))
     data = UserCreate(email="ada@example.com", name="Ada Lovelace")
     user = await service.create_user(session, resources.jobs, data)
-    await service.deactivate_user(session, admin, None, user.id)
+    await service.deactivate_user(session, resources.jobs, admin, None, user.id)
 
     await run_jobs()
 

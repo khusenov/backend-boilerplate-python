@@ -17,10 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bootstrap import job_app
 from app.core.config import Settings
-from app.core.jobs.queue import JobQueue, Message, driver_connection
-from app.core.jobs.tasks import observe_job, resources_of, settings_of, task
+from app.core.jobs.queue import Event, JobQueue, Payload, driver_connection
+from app.core.jobs.tasks import observe_job, resources_of, settings_of, subscriber, task
 from app.core.resources import Resources
 from app.modules.users.models import User
+from app.worker import work
 
 type RunJobs = Callable[[], Awaitable[None]]
 
@@ -34,43 +35,50 @@ blueprint = Blueprint()
 meeting = asyncio.Barrier(10)
 
 
-class RenameUser(Message):
+class RenameUser(Payload):
     task_name: ClassVar[str] = "tests.rename_user"
 
     user_id: uuid.UUID
     name: str
 
 
-class SendDigest(Message):
+class SendDigest(Payload):
     task_name: ClassVar[str] = "tests.send_digest"
 
 
-class RecordTimeouts(Message):
+class RecordTimeouts(Payload):
     task_name: ClassVar[str] = "tests.record_timeouts"
 
     user_id: uuid.UUID
 
 
-class RecordEnvironment(Message):
+class RecordEnvironment(Payload):
     task_name: ClassVar[str] = "tests.record_environment"
 
     user_id: uuid.UUID
 
 
-class Meet(Message):
+class Meet(Payload):
     task_name: ClassVar[str] = "tests.meet"
 
 
-class Interrupt(Message):
+class Interrupt(Payload):
     task_name: ClassVar[str] = "tests.interrupt"
 
 
-class FinishSoon(Message):
+class FinishSoon(Payload):
     task_name: ClassVar[str] = "tests.finish_soon"
 
 
-class Hang(Message):
+class Hang(Payload):
     task_name: ClassVar[str] = "tests.hang"
+
+
+class UserNamed(Event):
+    event_type: ClassVar[str] = "tests.user_named.v1"
+
+    user_id: uuid.UUID
+    name: str
 
 
 @task(blueprint, RenameUser)
@@ -120,6 +128,18 @@ async def finish_soon(context: JobContext, payload: FinishSoon) -> None:
 @task(blueprint, Hang)
 async def hang(context: JobContext, payload: Hang) -> None:
     await asyncio.Event().wait()
+
+
+@subscriber(blueprint, UserNamed, name="tests.apply_name")
+async def apply_name(context: JobContext, event: UserNamed) -> None:
+    async with resources_of(context).sessionmaker.begin() as session:
+        user = await session.get_one(User, event.user_id)
+        user.name = event.name
+
+
+@subscriber(blueprint, UserNamed, name="tests.ignore_name")
+async def ignore_name(context: JobContext, event: UserNamed) -> None:
+    pass
 
 
 job_app.add_tasks_from(blueprint, namespace="")
@@ -188,10 +208,18 @@ class RollbackError(Exception):
 
 
 async def defer_and_roll_back(
-    sessionmaker: async_sessionmaker[AsyncSession], jobs: JobQueue, payload: Message
+    sessionmaker: async_sessionmaker[AsyncSession], jobs: JobQueue, payload: Payload
 ) -> None:
     async with sessionmaker.begin() as session:
         await jobs.defer(session, payload)
+        raise RollbackError
+
+
+async def publish_and_roll_back(
+    sessionmaker: async_sessionmaker[AsyncSession], jobs: JobQueue, event: Event
+) -> None:
+    async with sessionmaker.begin() as session:
+        await jobs.publish(session, event)
         raise RollbackError
 
 
@@ -219,6 +247,13 @@ async def job_row(session: AsyncSession, job_id: int) -> JobRow:
         {"id": job_id},
     )
     return JobRow(*result.one())
+
+
+async def deferred_jobs(session: AsyncSession) -> list[tuple[str, dict[str, object]]]:
+    result = await session.execute(
+        text("SELECT task_name, args FROM procrastinate_jobs ORDER BY id")
+    )
+    return [(row.task_name, row.args) for row in result]
 
 
 async def job_ids(session: AsyncSession, task_name: str) -> list[int]:
@@ -255,3 +290,25 @@ async def mark_running(
         ),
         {"id": job_id, "silent_for": silent_for},
     )
+
+
+async def finished_status(
+    sessionmaker: async_sessionmaker[AsyncSession], job_id: int
+) -> str:
+    async with asyncio.timeout(10):
+        while True:
+            async with sessionmaker() as session:
+                status = (await job_row(session, job_id)).status
+            if status not in {"todo", "doing"}:
+                return status
+            await asyncio.sleep(0.1)
+
+
+async def work_until_finished(
+    settings: Settings, sessionmaker: async_sessionmaker[AsyncSession], *ids: int
+) -> list[str]:
+    async with asyncio.TaskGroup() as group:
+        worker = group.create_task(work(settings))
+        statuses = [await finished_status(sessionmaker, job_id) for job_id in ids]
+        worker.cancel()
+    return statuses

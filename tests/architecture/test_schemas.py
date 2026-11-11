@@ -94,6 +94,18 @@ def test_models_subclass_schema_or_message() -> None:
     assert loose == []
 
 
+def test_messages_ignore_unknown_fields() -> None:
+    messages = app_subclasses(Message)
+    strict = [
+        f"{message.__module__}.{message.__qualname__}"
+        for message in messages
+        if message.model_config.get("extra") != "ignore"
+    ]
+
+    assert messages
+    assert strict == []
+
+
 def test_routes_speak_schemas_never_messages(settings: Settings) -> None:
     models = list(route_models(create_app(settings).routes))
     foreign = [

@@ -15,10 +15,10 @@ from procrastinate.tasks import Task
 from procrastinate.worker import Worker
 
 from app.core.config import Settings
-from app.core.jobs.queue import Message
+from app.core.jobs.queue import Event, Message, Payload
 from app.core.resources import Resources
 
-type Handler[P: Message] = Callable[[JobContext, P], Awaitable[None]]
+type Handler[M: Message] = Callable[[JobContext, M], Awaitable[None]]
 
 WORKER_LOGGER = logging.getLogger("procrastinate.worker")
 
@@ -63,22 +63,34 @@ def settings_of(context: JobContext) -> Settings:
     return settings
 
 
-def task[P: Message](
-    blueprint: Blueprint, payload_type: type[P], *, queueing_lock: str | None = None
-) -> Callable[[Handler[P]], Handler[P]]:
-    def register(handler: Handler[P]) -> Handler[P]:
-        async def run(context: JobContext, **payload: object) -> None:
-            await handler(context, payload_type.model_validate(payload))
+def typed_task[M: Message](
+    blueprint: Blueprint,
+    message_type: type[M],
+    name: str,
+    queueing_lock: str | None = None,
+) -> Callable[[Handler[M]], Handler[M]]:
+    def register(handler: Handler[M]) -> Handler[M]:
+        async def run(context: JobContext, **fields: object) -> None:
+            await handler(context, message_type.model_validate(fields))
 
         blueprint.task(
-            name=payload_type.task_name,
-            pass_context=True,
-            retry=RETRY,
-            queueing_lock=queueing_lock,
+            name=name, pass_context=True, retry=RETRY, queueing_lock=queueing_lock
         )(run)
         return handler
 
     return register
+
+
+def task[P: Payload](
+    blueprint: Blueprint, payload_type: type[P], *, queueing_lock: str | None = None
+) -> Callable[[Handler[P]], Handler[P]]:
+    return typed_task(blueprint, payload_type, payload_type.task_name, queueing_lock)
+
+
+def subscriber[E: Event](
+    blueprint: Blueprint, event_type: type[E], *, name: str
+) -> Callable[[Handler[E]], Handler[E]]:
+    return typed_task(blueprint, event_type, name)
 
 
 def retry_decision(app: App, job: Job, error: BaseException) -> RetryDecision | None:
