@@ -1,13 +1,20 @@
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 from pydantic import SecretStr
-from sqlalchemy import event, text
+from sqlalchemy import event, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.db import conninfo, flush, psycopg_url
+from app.core.db import (
+    DELETE_BATCH_SIZE,
+    conninfo,
+    delete_in_batches,
+    flush,
+    psycopg_url,
+)
 from app.core.errors import ConflictError
 from tests.scratch import ScratchNote, ScratchTag
+from tests.statements import record_deletions, record_statements
 
 
 class TagTakenError(ConflictError):
@@ -17,6 +24,11 @@ class TagTakenError(ConflictError):
 @pytest.fixture
 def session(scratch_tables: None, session: AsyncSession) -> AsyncSession:
     return session
+
+
+async def add_notes(session: AsyncSession, body: str, count: int) -> None:
+    session.add_all([ScratchNote(body=body) for _ in range(count)])
+    await session.flush()
 
 
 async def add_duplicate_tags(session: AsyncSession) -> None:
@@ -176,3 +188,31 @@ async def test_flush_reraises_violations_without_a_constraint_name(
 
     with pytest.raises(IntegrityError, match="NotNullViolation"):
         await flush(session, {"uq_scratch_tags_note_id_name": TagTakenError})
+
+
+async def test_batched_deletes_remove_only_matching_rows_a_batch_at_a_time(
+    session: AsyncSession, sessionmaker: async_sessionmaker[AsyncSession]
+) -> None:
+    await add_notes(session, "fresh", 1)
+    await add_notes(session, "stale", DELETE_BATCH_SIZE + 1)
+    deletions = await record_deletions(session)
+
+    await delete_in_batches(sessionmaker, ScratchNote, ScratchNote.body == "stale")
+
+    assert deletions == [DELETE_BATCH_SIZE, 1]
+    assert list(await session.scalars(select(ScratchNote.body))) == ["fresh"]
+
+
+async def test_each_batch_commits_on_its_own(
+    session: AsyncSession, sessionmaker: async_sessionmaker[AsyncSession]
+) -> None:
+    await add_notes(session, "stale", DELETE_BATCH_SIZE + 1)
+    statements = await record_statements(session)
+
+    await delete_in_batches(sessionmaker, ScratchNote, ScratchNote.body == "stale")
+
+    assert [statement.split()[0] for statement in statements] == [
+        "SAVEPOINT",
+        "DELETE",
+        "RELEASE",
+    ] * 2

@@ -1,9 +1,12 @@
 [
   "auth.delete_sessions",
+  "auth.prune_expired_rows",
   "auth.send_code",
   "auth.send_password_changed_notice",
   "auth.send_reset_token",
   "heartbeat",
+  "prune_audit_events",
+  "prune_finished_jobs",
   "recover_stalled_jobs",
   "users.send_email_changed_notice",
   "users.send_welcome_email"

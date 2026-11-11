@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
-from sqlalchemy import Delete, Update, delete, select, update
+from sqlalchemy import Delete, Update, delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
@@ -31,10 +31,18 @@ from app.modules.users.models import UserStatus
 from app.worker import work
 from tests import jobs
 from tests.clients import bearer, serve
-from tests.factories import PASSWORD, make_credential, make_login_session, make_user
+from tests.factories import (
+    PASSWORD,
+    make_code,
+    make_credential,
+    make_login_session,
+    make_reset_token,
+    make_user,
+)
 from tests.jobs import (
     RollbackError,
     RunJobs,
+    defer_raw,
     finished_status,
     job_ids,
     job_row,
@@ -73,6 +81,34 @@ async def deactivate_and_roll_back(
     async with sessionmaker.begin() as session:
         await users_service.deactivate_user(session, queue, ADMIN, None, user_id)
         raise RollbackError
+
+
+async def still_valid(session: AsyncSession) -> list[tuple[str, list[bool]]]:
+    now = datetime.now(UTC)
+    states: list[tuple[str, list[bool]]] = []
+    for model in (LoginSession, VerificationCode, ResetToken):
+        expiries = await session.scalars(select(model.expires_at))
+        valid = sorted(expires_at > now for expires_at in expiries)
+        states.append((model.__tablename__, valid))
+    return states
+
+
+async def wait_until_blocked(
+    sessionmaker: async_sessionmaker[AsyncSession], statement: str
+) -> None:
+    async with asyncio.timeout(10):
+        while True:
+            async with sessionmaker() as session:
+                blocked = await session.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE "
+                        "wait_event_type = 'Lock' AND starts_with(query, :statement)"
+                    ),
+                    {"statement": statement},
+                )
+            if blocked:
+                return
+            await asyncio.sleep(0.05)
 
 
 async def test_codes_are_stored_as_an_hmac_under_the_secret_key(
@@ -394,3 +430,49 @@ async def test_logins_during_a_deactivation_leave_no_session(
 
     replies = [logging_in.result().status_code, deactivating.result().status_code]
     assert (replies, status, owners) == ([201, 204], "succeeded", [admin.id])
+
+
+async def test_pruning_removes_only_expired_sessions_codes_and_tokens(
+    session: AsyncSession, settings: Settings, run_jobs: RunJobs
+) -> None:
+    expired = datetime(2000, 1, 1, tzinfo=UTC)
+    ada = await make_user(session)
+    grace = await make_user(session)
+    await make_login_session(session, ada)
+    await make_login_session(session, grace, expires_at=expired)
+    await make_code(session, settings.secret_key, "new@example.com")
+    await make_code(session, settings.secret_key, "old@example.com", expires_at=expired)
+    await make_reset_token(session, settings.secret_key, ada)
+    await make_reset_token(session, settings.secret_key, grace, expires_at=expired)
+    await defer_raw(session, "auth.prune_expired_rows", timestamp=0)
+
+    await run_jobs()
+
+    assert await still_valid(session) == [
+        ("auth_sessions", [True]),
+        ("auth_verification_codes", [True]),
+        ("auth_reset_tokens", [True]),
+    ]
+
+
+@pytest.mark.committed
+async def test_pruning_spares_a_code_renewed_while_it_runs(
+    settings: Settings, sessionmaker: async_sessionmaker[AsyncSession]
+) -> None:
+    async with sessionmaker.begin() as session:
+        expired = datetime(2000, 1, 1, tzinfo=UTC)
+        await make_code(session, settings.secret_key, EMAIL, expires_at=expired)
+        prune = await defer_raw(session, "auth.prune_expired_rows", timestamp=0)
+    async with asyncio.TaskGroup() as group:
+        async with sessionmaker.begin() as session:
+            await verification.save_verification_code(session, EMAIL, user_id=None)
+            worker = group.create_task(work(settings))
+            await wait_until_blocked(
+                sessionmaker, "DELETE FROM auth_verification_codes"
+            )
+        status = await finished_status(sessionmaker, prune)
+        worker.cancel()
+    async with sessionmaker() as session:
+        codes = await session.scalars(select(VerificationCode.email))
+
+    assert (status, list(codes)) == ("succeeded", [EMAIL])

@@ -1,16 +1,21 @@
 import uuid
 from collections.abc import Mapping
+from datetime import timedelta
 
 import structlog
+from sqlalchemy import Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
 
+RETENTION = timedelta(days=365)
+
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
+    __table_args__ = (Index(None, "created_at"),)
 
     actor_id: Mapped[uuid.UUID | None]
     action: Mapped[str]

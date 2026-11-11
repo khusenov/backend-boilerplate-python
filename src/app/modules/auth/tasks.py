@@ -1,8 +1,17 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from procrastinate import Blueprint, JobContext
 
-from app.core.jobs.tasks import resources_of, settings_of, subscriber, task
+from app.core.db import delete_in_batches
+from app.core.jobs.periodic import HOURLY
+from app.core.jobs.tasks import (
+    periodic_task,
+    resources_of,
+    settings_of,
+    subscriber,
+    task,
+)
+from app.modules.auth.models import LoginSession, ResetToken, VerificationCode
 from app.modules.auth.schemas import SendCode, SendPasswordChangedNotice, SendResetToken
 from app.modules.auth.service import credentials, passwords, verification
 from app.modules.users import public as users
@@ -89,3 +98,11 @@ async def send_password_changed_notice(
 async def delete_sessions(context: JobContext, event: users.UserDeactivated) -> None:
     async with resources_of(context).sessionmaker.begin() as session:
         await credentials.delete_sessions(session, event.user_id)
+
+
+@periodic_task(blueprint, name="auth.prune_expired_rows", cron=HOURLY)
+async def prune_expired_rows(context: JobContext) -> None:
+    sessionmaker = resources_of(context).sessionmaker
+    now = datetime.now(UTC)
+    for model in (LoginSession, VerificationCode, ResetToken):
+        await delete_in_batches(sessionmaker, model, model.expires_at <= now)
