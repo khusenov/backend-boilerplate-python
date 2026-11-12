@@ -6,15 +6,26 @@ from typing import Any
 
 import psycopg
 from pydantic import SecretStr
-from sqlalchemy import URL, DateTime, Enum, MetaData, func, make_url
+from sqlalchemy import (
+    URL,
+    ColumnElement,
+    DateTime,
+    Enum,
+    MetaData,
+    delete,
+    func,
+    make_url,
+    select,
+)
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeEngine
 
 from app.core.errors import AppError
 
 MIGRATION_LOCK_ID = 7_243_015_001
+DELETE_BATCH_SIZE = 1000
 
 
 def psycopg_url(database_url: SecretStr) -> URL:
@@ -77,3 +88,17 @@ async def flush(session: AsyncSession, errors: Mapping[str, type[AppError]]) -> 
         if name is None or name not in errors:
             raise
         raise errors[name]() from error
+
+
+async def delete_in_batches(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    model: type[Base],
+    condition: ColumnElement[bool],
+) -> None:
+    batch = select(model.id).where(condition).limit(DELETE_BATCH_SIZE)
+    statement = delete(model).where(model.id.in_(batch), condition).returning(model.id)
+    while True:
+        async with sessionmaker.begin() as session:
+            deleted = (await session.scalars(statement)).all()
+        if len(deleted) < DELETE_BATCH_SIZE:
+            return

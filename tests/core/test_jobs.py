@@ -11,11 +11,14 @@ from procrastinate import JobContext
 from procrastinate.exceptions import AlreadyEnqueued, TaskNotFound
 from procrastinate.jobs import Job
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bootstrap import job_app
+from app.core.audit import AuditEvent
 from app.core.config import Settings
+from app.core.db import DELETE_BATCH_SIZE
 from app.core.errors import ConflictError
 from app.core.http.deps import DbSession, Jobs
 from app.core.jobs.periodic import heartbeat
@@ -24,7 +27,7 @@ from app.core.jobs.tasks import RETRY, resources_of, settings_of
 from app.core.logging import configure_logging
 from app.core.resources import Resources
 from app.core.sentry import configure_sentry
-from tests.factories import make_user
+from tests.factories import make_audit_event, make_user
 from tests.jobs import (
     Interrupt,
     RenameUser,
@@ -32,9 +35,11 @@ from tests.jobs import (
     RunJobs,
     SendDigest,
     UserNamed,
+    add_aged_jobs,
     defer_and_roll_back,
     defer_raw,
     deferred_jobs,
+    job_ages,
     job_ids,
     job_row,
     mark_running,
@@ -44,6 +49,7 @@ from tests.jobs import (
 )
 from tests.logs import json_lines
 from tests.sentry import FAKE_DSN, CapturingTransport, capture_sentry
+from tests.statements import record_deletions, record_statements
 
 NAMING = JobQueue(
     job_app, {UserNamed.event_type: ("tests.apply_name", "tests.ignore_name")}
@@ -422,20 +428,93 @@ async def test_recovery_moves_past_jobs_it_cannot_requeue(
     )
 
 
-def test_core_tasks_run_every_five_minutes() -> None:
+async def test_pruning_removes_only_audit_events_older_than_a_year(
+    session: AsyncSession, run_jobs: RunJobs
+) -> None:
+    now = datetime.now(UTC)
+    for days in (730, 400, 300, 0):
+        await make_audit_event(session, created_at=now - timedelta(days=days))
+    await defer_raw(session, "prune_audit_events", timestamp=0)
+
+    await run_jobs()
+
+    kept = await session.scalars(
+        select(AuditEvent.created_at).order_by(AuditEvent.created_at)
+    )
+    assert [(now - created_at).days for created_at in kept] == [300, 0]
+
+
+async def test_pruning_removes_only_jobs_finished_over_a_week_ago(
+    session: AsyncSession, run_jobs: RunJobs
+) -> None:
+    month = timedelta(days=30)
+    for status in ("succeeded", "failed", "cancelled", "aborted"):
+        await add_aged_jobs(session, status, age=month)
+    await add_aged_jobs(session, "succeeded", age=timedelta(days=10))
+    await add_aged_jobs(session, "succeeded", age=timedelta(days=3))
+    await add_aged_jobs(session, "todo", age=month)
+    await add_aged_jobs(session, "doing", age=month)
+    prune = await defer_raw(session, "prune_finished_jobs", timestamp=0)
+
+    await run_jobs()
+
+    assert await job_ages(session, "heartbeat") == [
+        ("succeeded", 3),
+        ("todo", 30),
+        ("doing", 30),
+    ]
+    assert (await job_row(session, prune)).status == "succeeded"
+
+
+async def test_finished_jobs_go_a_batch_at_a_time(
+    session: AsyncSession, run_jobs: RunJobs
+) -> None:
+    month = timedelta(days=30)
+    await add_aged_jobs(session, "succeeded", age=month, count=DELETE_BATCH_SIZE + 1)
+    await defer_raw(session, "prune_finished_jobs", timestamp=0)
+    deletions = await record_deletions(session)
+
+    await run_jobs()
+
+    remaining = await job_ages(session, "heartbeat")
+    assert (deletions, remaining) == ([DELETE_BATCH_SIZE, 1], [])
+
+
+async def test_each_batch_of_jobs_commits_on_its_own(
+    session: AsyncSession, run_jobs: RunJobs
+) -> None:
+    month = timedelta(days=30)
+    await add_aged_jobs(session, "succeeded", age=month, count=DELETE_BATCH_SIZE + 1)
+    await defer_raw(session, "prune_finished_jobs", timestamp=0)
+    statements = await record_statements(session)
+
+    await run_jobs()
+
+    assert [statement.split()[0] for statement in statements] == [
+        *["SAVEPOINT", "SELECT", "DELETE", "RELEASE"] * 2,
+        "SAVEPOINT",
+        "SELECT",
+        "RELEASE",
+    ]
+
+
+def test_periodic_tasks_keep_their_schedules_and_queueing_locks() -> None:
     schedules = sorted(
-        (scheduled.task.name, scheduled.cron)
+        (scheduled.task.name, scheduled.cron, scheduled.task.queueing_lock)
         for scheduled in job_app.periodic_registry.periodic_tasks.values()
     )
 
     assert schedules == [
-        ("heartbeat", "*/5 * * * *"),
-        ("recover_stalled_jobs", "*/5 * * * *"),
+        ("auth.prune_expired_rows", "0 * * * *", "auth.prune_expired_rows"),
+        ("heartbeat", "*/5 * * * *", None),
+        ("prune_audit_events", "0 * * * *", "prune_audit_events"),
+        ("prune_finished_jobs", "0 * * * *", "prune_finished_jobs"),
+        ("recover_stalled_jobs", "*/5 * * * *", "recover_stalled_jobs"),
     ]
 
 
 @pytest.mark.usefixtures("structured_logs")
-async def test_core_tasks_run_ahead_of_queued_jobs(
+async def test_heartbeat_and_recovery_run_ahead_of_queued_jobs(
     session: AsyncSession,
     resources: Resources,
     run_jobs: RunJobs,

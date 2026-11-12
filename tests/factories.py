@@ -7,6 +7,7 @@ from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditEvent
 from app.core.db import Base
 from app.core.security import Principal
 from app.modules.auth.models import Credential, LoginSession
@@ -88,6 +89,14 @@ async def make_reset_token(
         setattr(reset, name, value)
     await session.flush()
     return token
+
+
+async def make_audit_event(session: AsyncSession, **overrides: object) -> AuditEvent:
+    fields = {"action": "tests.recorded", "target_id": uuid.uuid7(), "changes": {}}
+    event = AuditEvent(**fields | overrides)
+    session.add(event)
+    await session.flush()
+    return event
 
 
 def wrong_code(code: str) -> str:

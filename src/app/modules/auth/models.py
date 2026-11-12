@@ -23,7 +23,7 @@ class LoginSession(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     token_hash: Mapped[bytes] = mapped_column(unique=True)
-    expires_at: Mapped[datetime]
+    expires_at: Mapped[datetime] = mapped_column(index=True)
 
 
 class VerificationCode(Base):

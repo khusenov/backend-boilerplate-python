@@ -10,6 +10,7 @@ import structlog
 from procrastinate import Blueprint, JobContext, PsycopgConnector
 from procrastinate.middleware import AsyncCallNext
 from procrastinate.periodic import PeriodicRegistry
+from procrastinate.types import JSONDict
 from procrastinate.worker import Worker
 from psycopg_pool import AsyncConnectionPool
 from sqlalchemy import text
@@ -254,6 +255,42 @@ async def deferred_jobs(session: AsyncSession) -> list[tuple[str, dict[str, obje
         text("SELECT task_name, args FROM procrastinate_jobs ORDER BY id")
     )
     return [(row.task_name, row.args) for row in result]
+
+
+async def add_aged_jobs(
+    session: AsyncSession, status: str, *, age: timedelta, count: int = 1
+) -> None:
+    connection = await driver_connection(session)
+    deferrer = job_app.configure_task("heartbeat", connection=connection)
+    tick: JSONDict = {"timestamp": 0}
+    ids = await deferrer.batch_defer_async(*[tick] * count)
+    await session.execute(
+        text(
+            "UPDATE procrastinate_jobs SET status = :status, "
+            "scheduled_at = now() + interval '1 day' WHERE id = ANY(:ids)"
+        ),
+        {"ids": ids, "status": status},
+    )
+    await session.execute(
+        text(
+            "UPDATE procrastinate_events "
+            "SET at = now() - make_interval(secs => :seconds) WHERE job_id = ANY(:ids)"
+        ),
+        {"ids": ids, "seconds": age.total_seconds()},
+    )
+
+
+async def job_ages(session: AsyncSession, task_name: str) -> list[tuple[str, int]]:
+    result = await session.execute(
+        text(
+            "SELECT job.status::text, extract(day FROM now() - max(event.at))::int "
+            "FROM procrastinate_jobs job "
+            "JOIN procrastinate_events event ON event.job_id = job.id "
+            "WHERE job.task_name = :name GROUP BY job.id ORDER BY job.id"
+        ),
+        {"name": task_name},
+    )
+    return [(status, days) for status, days in result]
 
 
 async def job_ids(session: AsyncSession, task_name: str) -> list[int]:

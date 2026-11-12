@@ -19,6 +19,7 @@ from app.core.jobs.queue import Event, Message, Payload
 from app.core.resources import Resources
 
 type Handler[M: Message] = Callable[[JobContext, M], Awaitable[None]]
+type PeriodicHandler = Callable[[JobContext], Awaitable[None]]
 
 WORKER_LOGGER = logging.getLogger("procrastinate.worker")
 
@@ -91,6 +92,22 @@ def subscriber[E: Event](
     blueprint: Blueprint, event_type: type[E], *, name: str
 ) -> Callable[[Handler[E]], Handler[E]]:
     return typed_task(blueprint, event_type, name)
+
+
+def periodic_task(
+    blueprint: Blueprint, *, name: str, cron: str
+) -> Callable[[PeriodicHandler], PeriodicHandler]:
+    def register(handler: PeriodicHandler) -> PeriodicHandler:
+        async def run(context: JobContext, timestamp: int) -> None:
+            await handler(context)
+
+        registered = blueprint.task(
+            name=name, pass_context=True, retry=RETRY, queueing_lock=name
+        )(run)
+        blueprint.periodic(cron=cron)(registered)
+        return handler
+
+    return register
 
 
 def retry_decision(app: App, job: Job, error: BaseException) -> RetryDecision | None:
