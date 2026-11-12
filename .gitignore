@@ -6,9 +6,5 @@ __pycache__/
 .coverage
 .coverage.*
 .env
-
-# local
-docs/*
-!docs/adr/
-.architecture-work
 .idea
+.DS_Store
