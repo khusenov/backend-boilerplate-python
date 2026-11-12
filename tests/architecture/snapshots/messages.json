@@ -13,6 +13,34 @@
     "title": "SendCode",
     "type": "object"
   },
+  "auth.send_password_changed_notice": {
+    "properties": {
+      "user_id": {
+        "format": "uuid",
+        "title": "User Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "user_id"
+    ],
+    "title": "SendPasswordChangedNotice",
+    "type": "object"
+  },
+  "auth.send_reset_token": {
+    "properties": {
+      "reset_id": {
+        "format": "uuid",
+        "title": "Reset Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "reset_id"
+    ],
+    "title": "SendResetToken",
+    "type": "object"
+  },
   "users.send_email_changed_notice": {
     "properties": {
       "old_email": {

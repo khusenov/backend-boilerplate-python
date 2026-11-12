@@ -10,11 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import Base
 from app.core.security import Principal
 from app.modules.auth.models import Credential, LoginSession
-from app.modules.auth.service import (
-    PASSWORD_HASHER,
-    SESSION_LIFETIME,
+from app.modules.auth.service.credentials import PASSWORD_HASHER, hash_token
+from app.modules.auth.service.passwords import (
+    find_reset_token,
+    issue_reset_token,
+    save_reset_token,
+)
+from app.modules.auth.service.sessions import SESSION_LIFETIME
+from app.modules.auth.service.verification import (
     find_verification_code,
-    hash_token,
     issue_code,
     save_verification_code,
 )
@@ -70,6 +74,20 @@ async def make_code(
         setattr(verification, name, value)
     await session.flush()
     return code
+
+
+async def make_reset_token(
+    session: AsyncSession, secret_key: SecretStr, user: User, **overrides: object
+) -> str:
+    reset_id = await save_reset_token(session, user.email)
+    reset = await find_reset_token(session, reset_id)
+    assert reset is not None
+    token = await issue_reset_token(session, secret_key, reset)
+    assert token is not None
+    for name, value in overrides.items():
+        setattr(reset, name, value)
+    await session.flush()
+    return token
 
 
 def wrong_code(code: str) -> str:

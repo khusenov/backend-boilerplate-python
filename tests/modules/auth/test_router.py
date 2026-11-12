@@ -20,7 +20,7 @@ from app.core.http.deps import SESSION_COOKIE
 from app.core.resources import Resources
 from app.core.security import Role
 from app.modules.auth.models import Credential, LoginSession
-from app.modules.auth.service import PASSWORD_HASHER, dummy_hash
+from app.modules.auth.service.credentials import PASSWORD_HASHER, dummy_hash
 from app.modules.users.models import User, UserStatus
 from tests.audit import audit_rows
 from tests.clients import bearer, connect, problem

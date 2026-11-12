@@ -1,3 +1,4 @@
+import base64
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -9,29 +10,39 @@ from pydantic import SecretStr
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings
 from app.core.resources import Resources
-from app.modules.auth.errors import TooManyAttemptsError
+from app.modules.auth.errors import InvalidTokenError, TooManyAttemptsError
 from app.modules.auth.models import Credential
 from app.modules.auth.schemas import PasswordSet
-from app.modules.auth.service import (
+from app.modules.auth.service.credentials import (
+    PASSWORD_HASHER,
+    dummy_hash,
+    password_matches,
+    set_password,
+)
+from app.modules.auth.service.limits import (
     CODE_REQUESTS_PER_ADDRESS,
     CODE_REQUESTS_PER_EMAIL,
     GUESSES_PER_ADDRESS,
     GUESSES_PER_EMAIL,
     LOGINS_PER_ADDRESS,
     LOGINS_PER_EMAIL,
-    PASSWORD_HASHER,
+    RESET_CONFIRMATIONS_PER_ADDRESS,
+    RESET_REQUESTS_PER_ADDRESS,
+    RESET_REQUESTS_PER_EMAIL,
     count_code_request,
     count_guess,
     count_login_attempt,
-    derive_code,
-    dummy_hash,
-    find_credential,
+    count_reset_confirmation,
+    count_reset_request,
     network_key,
-    password_matches,
-    set_password,
 )
-from tests.factories import PASSWORD, make_credential, make_user
+from app.modules.auth.service.passwords import derive_token, use_reset_token
+from app.modules.auth.service.sessions import find_credential
+from app.modules.auth.service.verification import derive_code
+from app.modules.users import public as users
+from tests.factories import PASSWORD, make_credential, make_reset_token, make_user
 from tests.statements import first_words, record_statements
 
 EMAIL = "ada@example.com"
@@ -208,6 +219,71 @@ async def test_code_request_and_guess_budgets_refill_after_their_windows(
     )
 
 
+async def test_an_address_gets_ten_reset_requests_an_hour(
+    limiter: MovingWindowRateLimiter,
+) -> None:
+    emails = [f"user{n}@example.com" for n in range(11)]
+    replies = [
+        await attempt(limiter, "203.0.113.7", email, count_reset_request)
+        for email in emails
+    ]
+    other_address = await attempt(
+        limiter, "198.51.100.1", emails[0], count_reset_request
+    )
+
+    assert replies == [True] * 10 + [False]
+    assert other_address
+
+
+async def test_an_email_gets_five_reset_requests_an_hour(
+    limiter: MovingWindowRateLimiter,
+) -> None:
+    addresses = [f"198.51.100.{n}" for n in range(6)]
+    replies = [
+        await attempt(limiter, address, EMAIL, count_reset_request)
+        for address in addresses
+    ]
+
+    assert replies == [True] * 5 + [False]
+
+
+async def test_reset_budgets_refill_an_hour_after_each_attempt(
+    limiter: MovingWindowRateLimiter,
+) -> None:
+    started = time.time()
+    await count_reset_request(limiter, "203.0.113.7", EMAIL)
+    await count_reset_confirmation(limiter, "203.0.113.7")
+
+    windows = [
+        await limiter.get_window_stats(
+            RESET_REQUESTS_PER_ADDRESS, "reset_request", "203.0.113.7"
+        ),
+        await limiter.get_window_stats(
+            RESET_REQUESTS_PER_EMAIL, "reset_request", EMAIL
+        ),
+        await limiter.get_window_stats(
+            RESET_CONFIRMATIONS_PER_ADDRESS, "reset_confirmation", "203.0.113.7"
+        ),
+    ]
+
+    assert [window.remaining for window in windows] == [9, 4, 19]
+    assert [window.reset_time - started for window in windows] == pytest.approx(
+        [3600, 3600, 3600], abs=1
+    )
+
+
+def test_reset_tokens_are_32_bytes_in_url_safe_base64() -> None:
+    key = SecretStr("test-secret-key")
+
+    tokens = {derive_token(key, bytes([n])) for n in range(50)}
+    under_another_key = derive_token(SecretStr("another-secret-key"), bytes([0]))
+
+    assert len(tokens) == 50
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]{43}", token) for token in tokens)
+    assert {len(base64.urlsafe_b64decode(token + "=")) for token in tokens} == {32}
+    assert under_another_key not in tokens
+
+
 def test_codes_keep_six_digits_and_their_leading_zeros() -> None:
     key = SecretStr("test-secret-key")
 
@@ -245,21 +321,33 @@ async def test_credential_lookups_refresh_the_row(session: AsyncSession) -> None
     assert credential.password_hash == "changed"
 
 
-async def test_setting_a_password_is_one_upsert(
+async def test_setting_a_password_voids_resets_upserts_and_ends_sessions(
     session: AsyncSession, resources: Resources
 ) -> None:
-    user = await make_user(session)
+    user = users.UserDTO.model_validate(await make_user(session))
     statements = await record_statements(session)
 
-    await set_password(
-        session, resources.hashing, user.id, PasswordSet(password=PASSWORD)
-    )
+    await set_password(session, resources.hashing, user, PasswordSet(password=PASSWORD))
 
     assert list(map(first_words, statements)) == [
+        "DELETE FROM auth_reset_tokens",
         "INSERT INTO auth_credentials",
         "DELETE FROM auth_sessions",
     ]
     assert (
         " ON CONFLICT ON CONSTRAINT uq_auth_credentials_user_id DO UPDATE SET "
-        in statements[0]
+        in statements[1]
     )
+
+
+async def test_using_a_reset_token_spends_it(
+    session: AsyncSession, settings: Settings
+) -> None:
+    user = await make_user(session)
+    token = await make_reset_token(session, settings.secret_key, user)
+
+    owner = await use_reset_token(session, token)
+
+    assert owner.id == user.id
+    with pytest.raises(InvalidTokenError):
+        await use_reset_token(session, token)

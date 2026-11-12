@@ -15,3 +15,7 @@ class InvalidCodeError(ForbiddenError):
 
 class WrongPasswordError(ForbiddenError):
     code = "auth.wrong_password"
+
+
+class InvalidTokenError(ForbiddenError):
+    code = "auth.invalid_token"
