@@ -19,7 +19,7 @@ from app.core.config import Settings
 from app.core.errors import ConflictError
 from app.core.http.deps import DbSession, Jobs
 from app.core.jobs.periodic import heartbeat
-from app.core.jobs.queue import Message
+from app.core.jobs.queue import JobQueue, Payload
 from app.core.jobs.tasks import RETRY, resources_of, settings_of
 from app.core.logging import configure_logging
 from app.core.resources import Resources
@@ -31,21 +31,28 @@ from tests.jobs import (
     RollbackError,
     RunJobs,
     SendDigest,
+    UserNamed,
     defer_and_roll_back,
     defer_raw,
+    deferred_jobs,
     job_ids,
     job_row,
     mark_running,
     postpone,
+    publish_and_roll_back,
     set_attempts,
 )
 from tests.logs import json_lines
 from tests.sentry import FAKE_DSN, CapturingTransport, capture_sentry
 
+NAMING = JobQueue(
+    job_app, {UserNamed.event_type: ("tests.apply_name", "tests.ignore_name")}
+)
+
 router = APIRouter()
 
 
-class Unregistered(Message):
+class Unregistered(Payload):
     task_name: ClassVar[str] = "tests.unregistered"
 
 
@@ -178,6 +185,57 @@ async def test_a_refused_defer_leaves_the_transaction_usable(
     await session.flush()
 
     assert await job_ids(session, SendDigest.task_name) == [first]
+
+
+async def test_events_defer_one_job_per_subscriber(
+    session: AsyncSession, run_jobs: RunJobs
+) -> None:
+    ada = await make_user(session, name="Ada")
+    event = UserNamed(user_id=ada.id, name="Ada Lovelace")
+
+    await NAMING.publish(session, event)
+    await run_jobs()
+
+    await session.refresh(ada)
+    fields = {"user_id": str(ada.id), "name": "Ada Lovelace"}
+    assert await deferred_jobs(session) == [
+        ("tests.apply_name", fields),
+        ("tests.ignore_name", fields),
+    ]
+    assert ada.name == "Ada Lovelace"
+
+
+async def test_rolled_back_events_publish_nothing(
+    session: AsyncSession,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    run_jobs: RunJobs,
+) -> None:
+    ada = await make_user(session, name="Ada")
+    event = UserNamed(user_id=ada.id, name="Grace Hopper")
+
+    with pytest.raises(RollbackError):
+        await publish_and_roll_back(sessionmaker, NAMING, event)
+    await run_jobs()
+
+    await session.refresh(ada)
+    assert ada.name == "Ada"
+    assert await deferred_jobs(session) == []
+
+
+async def test_events_without_subscribers_defer_nothing(session: AsyncSession) -> None:
+    event = UserNamed(user_id=uuid.uuid7(), name="Ada Lovelace")
+
+    await JobQueue(job_app, {}).publish(session, event)
+
+    assert await deferred_jobs(session) == []
+
+
+async def test_subscribers_must_be_registered_tasks(session: AsyncSession) -> None:
+    queue = JobQueue(job_app, {UserNamed.event_type: ("tests.unregistered",)})
+    event = UserNamed(user_id=uuid.uuid7(), name="Ada Lovelace")
+
+    with pytest.raises(TaskNotFound):
+        await queue.publish(session, event)
 
 
 async def test_failed_jobs_retry_two_seconds_later(

@@ -3,7 +3,7 @@ from typing import ClassVar
 
 from pydantic import MISSING
 
-from app.core.jobs.queue import Message
+from app.core.jobs.queue import Event, Payload
 from app.core.schemas import Email, Name, Schema, Timestamp
 from app.core.security import Role
 
@@ -47,13 +47,19 @@ class UserDTO(Schema):
     active: bool
 
 
-class SendWelcomeEmail(Message):
+class SendWelcomeEmail(Payload):
     task_name: ClassVar[str] = "users.send_welcome_email"
 
     user_id: uuid.UUID
 
 
-class SendEmailChangedNotice(Message):
+class SendEmailChangedNotice(Payload):
     task_name: ClassVar[str] = "users.send_email_changed_notice"
 
     old_email: str
+
+
+class UserDeactivated(Event):
+    event_type: ClassVar[str] = "users.deactivated.v1"
+
+    user_id: uuid.UUID

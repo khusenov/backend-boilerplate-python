@@ -15,6 +15,7 @@ from app.modules.auth import models as auth_models
 from app.modules.auth import public as auth
 from app.modules.auth import tasks as auth_tasks
 from app.modules.users import models as users_models
+from app.modules.users import public as users
 from app.modules.users import tasks as users_tasks
 
 API_TIMEOUTS = "-c statement_timeout=5s -c idle_in_transaction_session_timeout=30s"
@@ -22,6 +23,7 @@ HASHING_THREADS = 4
 
 MODELS = (auth_models, users_models)
 BLUEPRINTS = (periodic.blueprint, auth_tasks.blueprint, users_tasks.blueprint)
+SUBSCRIBERS = {users.UserDeactivated.event_type: ("auth.delete_sessions",)}
 metadata = Base.metadata
 job_app = build_job_app(BLUEPRINTS)
 
@@ -37,7 +39,7 @@ def build_resources(settings: Settings, timeouts: str = API_TIMEOUTS) -> Resourc
     return Resources(
         engine=engine,
         sessionmaker=sessionmaker,
-        jobs=JobQueue(job_app),
+        jobs=JobQueue(job_app, SUBSCRIBERS),
         email=SmtpEmailSender(
             host=settings.smtp_host,
             port=settings.smtp_port,

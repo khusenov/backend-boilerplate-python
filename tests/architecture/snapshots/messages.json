@@ -41,6 +41,20 @@
     "title": "SendResetToken",
     "type": "object"
   },
+  "users.deactivated.v1": {
+    "properties": {
+      "user_id": {
+        "format": "uuid",
+        "title": "User Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "user_id"
+    ],
+    "title": "UserDeactivated",
+    "type": "object"
+  },
   "users.send_email_changed_notice": {
     "properties": {
       "old_email": {

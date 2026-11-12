@@ -1,18 +1,24 @@
+import asyncio
 import base64
 import hashlib
 import hmac
+import threading
+import uuid
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import Delete, Update, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.core.jobs.queue import driver_connection
+from app.core.jobs.queue import JobQueue, driver_connection
 from app.core.resources import Resources
-from app.modules.auth.models import ResetToken, VerificationCode
+from app.core.security import Principal, Role
+from app.main import create_app
+from app.modules.auth.models import LoginSession, ResetToken, VerificationCode
 from app.modules.auth.schemas import (
     PasswordReset,
     SendCode,
@@ -20,13 +26,25 @@ from app.modules.auth.schemas import (
     SendResetToken,
 )
 from app.modules.auth.service import passwords, verification
+from app.modules.users import service as users_service
 from app.modules.users.models import UserStatus
+from app.worker import work
 from tests import jobs
-from tests.factories import PASSWORD, make_user
-from tests.jobs import RunJobs, job_ids, job_row, postpone
+from tests.clients import bearer, serve
+from tests.factories import PASSWORD, make_credential, make_login_session, make_user
+from tests.jobs import (
+    RollbackError,
+    RunJobs,
+    finished_status,
+    job_ids,
+    job_row,
+    postpone,
+    work_until_finished,
+)
 from tests.outbox import Outbox, SentEmail, TransactionProbe, code_in, token_in
 
 EMAIL = "ada@example.com"
+ADMIN = Principal(user_id=uuid.uuid7(), session_id=uuid.uuid7(), role=Role.ADMIN)
 
 
 @dataclass(slots=True)
@@ -43,6 +61,18 @@ async def request_reset(session: AsyncSession, resources: Resources) -> None:
     await passwords.request_password_reset(
         session, resources.jobs, resources.limiter, None, PasswordReset(email=EMAIL)
     )
+
+
+async def session_owners(session: AsyncSession) -> list[uuid.UUID]:
+    return sorted(await session.scalars(select(LoginSession.user_id)))
+
+
+async def deactivate_and_roll_back(
+    sessionmaker: async_sessionmaker[AsyncSession], queue: JobQueue, user_id: uuid.UUID
+) -> None:
+    async with sessionmaker.begin() as session:
+        await users_service.deactivate_user(session, queue, ADMIN, None, user_id)
+        raise RollbackError
 
 
 async def test_codes_are_stored_as_an_hmac_under_the_secret_key(
@@ -283,3 +313,84 @@ async def test_no_transaction_spans_the_password_emails(
     await jobs.run_jobs(driver, settings, replace(resources, email=probe))
 
     assert probe.savepoint_open == [False]
+
+
+async def test_deactivation_deletes_the_users_sessions_once_its_job_runs(
+    client: AsyncClient, session: AsyncSession, run_jobs: RunJobs
+) -> None:
+    admin = await make_user(session, role=Role.ADMIN)
+    leaver, stayer = await make_user(session), await make_user(session)
+    headers = bearer(await make_login_session(session, admin))
+    for user in (leaver, leaver, stayer):
+        await make_login_session(session, user)
+
+    response = await client.delete(f"/v1/users/{leaver.id}", headers=headers)
+    before = await session_owners(session)
+    await run_jobs()
+
+    assert response.status_code == 204
+    assert before == sorted([admin.id, leaver.id, leaver.id, stayer.id])
+    assert await session_owners(session) == sorted([admin.id, stayer.id])
+
+
+@pytest.mark.committed
+async def test_the_worker_deletes_sessions_for_committed_deactivations_only(
+    settings: Settings,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    resources: Resources,
+) -> None:
+    async with sessionmaker.begin() as session:
+        admin = await make_user(session, role=Role.ADMIN)
+        stayer, leaver = await make_user(session), await make_user(session)
+        headers = bearer(await make_login_session(session, admin))
+        for user in (stayer, leaver, leaver):
+            await make_login_session(session, user)
+    with pytest.raises(RollbackError):
+        await deactivate_and_roll_back(sessionmaker, resources.jobs, stayer.id)
+    async with serve(create_app(settings)) as client:
+        response = await client.delete(f"/v1/users/{leaver.id}", headers=headers)
+    async with sessionmaker() as session:
+        (job_id,) = await job_ids(session, "auth.delete_sessions")
+        before = await session_owners(session)
+
+    statuses = await work_until_finished(settings, sessionmaker, job_id)
+
+    async with sessionmaker() as session:
+        after = await session_owners(session)
+    assert response.status_code == 204
+    assert before == sorted([admin.id, stayer.id, leaver.id, leaver.id])
+    assert (statuses, after) == (["succeeded"], sorted([admin.id, stayer.id]))
+
+
+@pytest.mark.committed
+async def test_logins_during_a_deactivation_leave_no_session(
+    app: FastAPI,
+    settings: Settings,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    resume_hashing: threading.Event,
+) -> None:
+    async with sessionmaker.begin() as session:
+        admin = await make_user(session, role=Role.ADMIN)
+        leaver = await make_user(session)
+        await make_credential(session, leaver)
+        headers = bearer(await make_login_session(session, admin))
+    login = {"email": leaver.email, "password": PASSWORD}
+    async with serve(app) as client, asyncio.TaskGroup() as group:
+        worker = group.create_task(work(settings))
+        logging_in = group.create_task(client.post("/v1/auth/tokens", json=login))
+        await asyncio.sleep(0.2)
+        deactivating = group.create_task(
+            client.delete(f"/v1/users/{leaver.id}", headers=headers)
+        )
+        await asyncio.sleep(0.2)
+        resume_hashing.set()
+        await deactivating
+        async with sessionmaker() as session:
+            (job_id,) = await job_ids(session, "auth.delete_sessions")
+        status = await finished_status(sessionmaker, job_id)
+        worker.cancel()
+    async with sessionmaker() as session:
+        owners = await session_owners(session)
+
+    replies = [logging_in.result().status_code, deactivating.result().status_code]
+    assert (replies, status, owners) == ([201, 204], "succeeded", [admin.id])

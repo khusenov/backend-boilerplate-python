@@ -2,9 +2,9 @@ from datetime import timedelta
 
 from procrastinate import Blueprint, JobContext
 
-from app.core.jobs.tasks import resources_of, settings_of, task
+from app.core.jobs.tasks import resources_of, settings_of, subscriber, task
 from app.modules.auth.schemas import SendCode, SendPasswordChangedNotice, SendResetToken
-from app.modules.auth.service import passwords, verification
+from app.modules.auth.service import credentials, passwords, verification
 from app.modules.users import public as users
 
 CODE_MINUTES = verification.CODE_LIFETIME // timedelta(minutes=1)
@@ -83,3 +83,9 @@ async def send_password_changed_notice(
                 "If you did not change it, reset it at once.\n"
             ),
         )
+
+
+@subscriber(blueprint, users.UserDeactivated, name="auth.delete_sessions")
+async def delete_sessions(context: JobContext, event: users.UserDeactivated) -> None:
+    async with resources_of(context).sessionmaker.begin() as session:
+        await credentials.delete_sessions(session, event.user_id)

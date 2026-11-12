@@ -79,6 +79,7 @@ async def deactivate_user(
     user_id: uuid.UUID,
     principal: CurrentPrincipal,
     session: DbSession,
+    jobs: Jobs,
     client_ip: ClientIp,
 ) -> None:
-    await service.deactivate_user(session, principal, client_ip, user_id)
+    await service.deactivate_user(session, jobs, principal, client_ip, user_id)

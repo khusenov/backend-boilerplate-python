@@ -1,4 +1,5 @@
 [
+  "auth.delete_sessions",
   "auth.send_code",
   "auth.send_password_changed_notice",
   "auth.send_reset_token",

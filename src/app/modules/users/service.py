@@ -18,6 +18,7 @@ from app.modules.users.schemas import (
     SendEmailChangedNotice,
     SendWelcomeEmail,
     UserCreate,
+    UserDeactivated,
     UserUpdate,
 )
 
@@ -89,8 +90,15 @@ async def get_user_unscoped(session: AsyncSession, user_id: uuid.UUID) -> User:
     return user
 
 
-async def find_user_by_email(session: AsyncSession, email: str) -> User | None:
-    return await session.scalar(select(User).where(User.email == email))
+async def find_user_by_email(
+    session: AsyncSession, email: str, *, for_share: bool = False
+) -> User | None:
+    statement = select(User).where(User.email == email)
+    if for_share:
+        statement = statement.with_for_update(read=True).execution_options(
+            populate_existing=True
+        )
+    return await session.scalar(statement)
 
 
 async def list_users(
@@ -165,6 +173,7 @@ async def change_email(
 
 async def deactivate_user(
     session: AsyncSession,
+    jobs: JobQueue,
     principal: Principal,
     client_ip: str | None,
     user_id: uuid.UUID,
@@ -182,4 +191,5 @@ async def deactivate_user(
         changes={"status": UserStatus.DEACTIVATED},
     )
     await flush(session, {})
+    await jobs.publish(session, UserDeactivated(user_id=user.id))
     return user

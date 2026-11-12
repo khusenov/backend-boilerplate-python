@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from testcontainers.community.postgres import PostgresContainer
 
-from app.bootstrap import job_app
+from app.bootstrap import SUBSCRIBERS, job_app
 from app.core.config import Settings
 from app.core.jobs.queue import JobQueue
 from app.core.resources import Resources
@@ -180,7 +180,7 @@ def resources(
         yield Resources(
             engine=engine,
             sessionmaker=sessionmaker,
-            jobs=JobQueue(job_app),
+            jobs=JobQueue(job_app, SUBSCRIBERS),
             email=outbox,
             limiter=MovingWindowRateLimiter(MemoryStorage()),
             hashing=hashing,

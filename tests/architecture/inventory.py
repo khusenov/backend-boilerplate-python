@@ -15,7 +15,7 @@ import app
 from app import bootstrap
 from app.core.db import Base
 from app.core.errors import AppError
-from app.core.jobs.queue import Message
+from app.core.jobs.queue import Event, Message, Payload
 
 
 @dataclass(frozen=True)
@@ -68,6 +68,10 @@ def app_errors() -> list[type[AppError]]:
     return [error for error in app_error_classes() if hasattr(error, "code")]
 
 
+def app_events() -> list[type[Event]]:
+    return [event for event in app_subclasses(Event) if hasattr(event, "event_type")]
+
+
 def task_names() -> list[str]:
     return sorted(
         name for blueprint in bootstrap.BLUEPRINTS for name in blueprint.tasks
@@ -75,11 +79,12 @@ def task_names() -> list[str]:
 
 
 def app_messages() -> dict[str, type[Message]]:
-    return {
-        message.task_name: message
-        for message in app_subclasses(Message)
-        if hasattr(message, "task_name")
+    messages: dict[str, type[Message]] = {
+        payload.task_name: payload
+        for payload in app_subclasses(Payload)
+        if hasattr(payload, "task_name")
     }
+    return messages | {event.event_type: event for event in app_events()}
 
 
 def models_in(
